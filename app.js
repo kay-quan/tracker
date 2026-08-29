@@ -1136,6 +1136,17 @@ function eventsCalendar() {
   html += '<div class="legend"><span><i class="swatch" style="background:#6f5bd1"></i>From Edmtrain</span>' +
     '<span><i class="swatch" style="background:#b07d2b"></i>Added by you</span>' +
     '<span class="muted">Click a day to add a show, or a show for its details.</span></div>';
+
+  // The grid gives the shape of the month; this lists every show underneath in
+  // full, so nothing is hidden behind a "+2 more" or trimmed to fit a cell.
+  const monthCount = Object.keys(byDate)
+    .filter((d) => d.slice(0, 7) === state.calMonth)
+    .reduce((n, d) => n + byDate[d].length, 0);
+  html += '<h2 class="section-head">Day by day' +
+    (monthCount ? ' <span class="count">' + monthCount + " show" + (monthCount === 1 ? "" : "s") + "</span>" : "") +
+    "</h2>";
+  html += eventsAgenda(byDate);
+
   return html;
 }
 
