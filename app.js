@@ -1098,25 +1098,56 @@ function gigsCalendar() {
 }
 
 function eventsCalendar() {
-  const events = DB.localEvents || [];
+  const all = DB.localEvents || [];
+  // Edmtrain flags festivals separately from club and venue shows. They're
+  // different propositions - multi-day, booked further out - so they can be
+  // looked at on their own.
+  const kind = state.eventKind || "";
+  const events = kind === "festival" ? all.filter((e) => e.festival)
+    : kind === "show" ? all.filter((e) => !e.festival)
+    : all;
   const byDate = {};
   events.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  // Festivals first within a day. The grid only shows the first few events per
+  // cell, and a festival is the last thing that should be collapsed behind a
+  // "+2 more" - it's the biggest booking on offer.
+  Object.keys(byDate).forEach((d) => {
+    byDate[d].sort((a, b) => (b.festival ? 1 : 0) - (a.festival ? 1 : 0) ||
+      (a.venue || "").localeCompare(b.venue || ""));
+  });
   const monthEvents = events.filter((e) => e.date && e.date.slice(0, 7) === state.calMonth);
   const venues = new Set(monthEvents.map((e) => e.venue).filter(Boolean));
+  const kindWord = kind === "festival" ? "festival" : "show";
+  const n = monthEvents.length;
 
   let html =
     '<div class="page-head"><div><h1>Local Events</h1><p>' +
-    (events.length
-      ? monthEvents.length + " show" + (monthEvents.length === 1 ? "" : "s") + " this month across " +
-        venues.size + " venue" + (venues.size === 1 ? "" : "s") + " in " +
-        esc(DB.settings.eventCity || "your area") + "."
+    (all.length
+      ? (n
+          ? n + " " + kindWord + (n === 1 ? "" : "s") + " this month" +
+            (kind === "festival" ? "" : " across " + venues.size +
+              " venue" + (venues.size === 1 ? "" : "s")) +
+            " in " + esc(DB.settings.eventCity || "your area") + "."
+          : "No " + kindWord + "s listed this month in " +
+            esc(DB.settings.eventCity || "your area") + ".")
       : "Shows near you, pulled from Edmtrain.") + "</p></div>" +
     '<div class="page-actions">' + calTabs() +
     '<button class="btn" data-act="refresh-events">Refresh</button>' +
     '<button class="btn btn-primary" data-act="new-local-event">Add event</button></div></div>';
 
   html += eventsStatusBar();
-  if (!DB.localEvents || !DB.localEvents.length) return html + eventsEmptyState();
+  if (!all.length) return html + eventsEmptyState();
+
+  const inMonth = (list) => list.filter((e) => (e.date || "").slice(0, 7) === state.calMonth).length;
+  const kinds = [
+    { key: "", label: "Everything", n: inMonth(all) },
+    { key: "show", label: "Shows", n: inMonth(all.filter((e) => !e.festival)) },
+    { key: "festival", label: "Festivals", n: inMonth(all.filter((e) => e.festival)) },
+  ];
+  html += '<div class="chips">' + kinds.map((k) =>
+    '<button class="chip' + (kind === k.key ? " active" : "") +
+    '" data-act="event-kind" data-key="' + k.key + '">' + esc(k.label) +
+    '<span class="n">' + k.n + "</span></button>").join("") + "</div>";
 
   html += calNav(monthLabelOf(state.calMonth));
 
@@ -1125,7 +1156,8 @@ function eventsCalendar() {
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
     return list.slice(0, 3).map((e) =>
-      '<div class="cal-event ev-show' + (e.manual ? " ev-mine" : "") + '" data-act="show-event" data-id="' +
+      '<div class="cal-event ev-show' + (e.manual ? " ev-mine" : e.festival ? " ev-fest" : "") +
+      '" data-act="show-event" data-id="' +
       esc(e.id) + '" title="' + esc(eventTooltip(e)) + '">' +
       '<span class="ev-who">' + esc(eventWho(e)) + "</span>" +
       (e.venue ? '<span class="ev-venue">' + esc(e.venue) + "</span>" : "") +
@@ -1133,7 +1165,8 @@ function eventsCalendar() {
       (list.length > 3 ? '<div class="cal-more">+' + (list.length - 3) + " more</div>" : "");
   }, "local-day");
 
-  html += '<div class="legend"><span><i class="swatch" style="background:#6f5bd1"></i>From Edmtrain</span>' +
+  html += '<div class="legend"><span><i class="swatch" style="background:#6f5bd1"></i>Show</span>' +
+    '<span><i class="swatch" style="background:#c2557a"></i>Festival</span>' +
     '<span><i class="swatch" style="background:#b07d2b"></i>Added by you</span>' +
     '<span class="muted">Click a day to add a show, or a show for its details.</span></div>';
 
@@ -1169,7 +1202,8 @@ function eventsAgenda(byDate) {
   }
   const today = todayISO();
   return dates.map((d) => {
-    const list = byDate[d].slice().sort((a, b) => (a.venue || "").localeCompare(b.venue || ""));
+    const list = byDate[d].slice().sort((a, b) => (b.festival ? 1 : 0) - (a.festival ? 1 : 0) ||
+      (a.venue || "").localeCompare(b.venue || ""));
     const day = parseISO(d);
     return '<div class="agenda-day">' +
       '<div class="agenda-date' + (d === today ? " is-today" : "") + '">' +
@@ -1178,9 +1212,11 @@ function eventsAgenda(byDate) {
       (d === today ? '<span class="agenda-dow">today</span>' : "") +
       '<span class="agenda-count">' + list.length + " show" + (list.length === 1 ? "" : "s") + "</span></div>" +
       list.map((e) =>
-        '<div class="agenda-row' + (e.manual ? " mine" : "") + '" data-act="show-event" data-id="' +
+        '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
+        '" data-act="show-event" data-id="' +
         esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
-        '<div class="agenda-venue">' + esc(eventWho(e)) + "</div>" +
+        '<div class="agenda-venue">' + esc(eventWho(e)) +
+        (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</div>" +
         (e.venue ? '<div class="agenda-name">' + esc(e.venue) +
           (e.ages ? " \u00b7 " + esc(e.ages) : "") + "</div>" : "") +
         "</div></div>").join("") +
@@ -2748,6 +2784,7 @@ document.addEventListener("click", (e) => {
     case "quick-client": quickClient(); break;
 
     case "cal-mode": state.calMode = el.dataset.mode; render(); break;
+    case "event-kind": state.eventKind = el.dataset.key; render(); break;
     case "new-local-event": localEventForm(null); break;
     case "edit-local-event": {
       closeModal();

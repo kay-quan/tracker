@@ -1342,3 +1342,27 @@ body[data-view="login"] { padding-bottom: 0; }
   margin: 0 0 10px;
   letter-spacing: -0.01em;
 }
+
+/* ---------- Festivals, set apart from club and venue shows ---------- */
+
+.ev-fest { background: #f7e4ec; border-color: #c2557a; color: #7a2f4c; }
+.agenda-row.fest .agenda-dot { background: #c2557a; }
+
+.tag-fest {
+  display: inline-block;
+  background: #f7e4ec;
+  color: #7a2f4c;
+  border-radius: 20px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  margin-left: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ev-fest { background: #46243a; border-color: #e08bb0; color: #f2c3d6; }
+  .tag-fest { background: #46243a; color: #f2c3d6; }
+}
