@@ -1215,10 +1215,16 @@ function eventsAgenda(byDate) {
         '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
         '" data-act="show-event" data-id="' +
         esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
-        '<div class="agenda-venue">' + esc(eventWho(e)) +
+        '<div class="agenda-venue">' + esc(eventLineup(e)) +
         (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</div>" +
-        (e.venue ? '<div class="agenda-name">' + esc(e.venue) +
-          (e.ages ? " \u00b7 " + esc(e.ages) : "") + "</div>" : "") +
+        // When the feed gave no lineup the headline falls back to the venue,
+        // so don't print the venue a second time underneath it.
+        (function () {
+          const sub = [];
+          if (e.venue && eventLineup(e) !== e.venue) sub.push(esc(e.venue));
+          if (e.ages) sub.push(esc(e.ages));
+          return sub.length ? '<div class="agenda-name">' + sub.join(" \u00b7 ") + "</div>" : "";
+        })() +
         "</div></div>").join("") +
       "</div>";
   }).join("");
@@ -1228,10 +1234,21 @@ function eventsAgenda(byDate) {
 // more useful than the event title, which is often just the venue's night name.
 function eventWho(e) {
   const acts = (e.artists || []).filter(Boolean);
-  if (!acts.length) return e.name || "Show";
+  if (!acts.length) {
+    return (e.name && e.name !== "Untitled event") ? e.name : (e.venue || "Show");
+  }
   if (acts.length === 1) return acts[0];
   if (acts.length === 2) return acts[0] + " + " + acts[1];
   return acts[0] + " +" + (acts.length - 1) + " more";
+}
+
+// The complete bill, for places with room to show it.
+function eventLineup(e) {
+  const acts = (e.artists || []).filter(Boolean);
+  if (acts.length) return acts.join(", ");
+  // No lineup came back from the feed - fall back to whatever names the event.
+  if (e.name && e.name !== "Untitled event") return e.name;
+  return e.venue || "Show";
 }
 
 // Everything about the show, for the hover tooltip.
