@@ -1119,6 +1119,9 @@ function eventsCalendar() {
   if (!DB.localEvents || !DB.localEvents.length) return html + eventsEmptyState();
 
   html += calNav(monthLabelOf(state.calMonth));
+
+  if (isNarrow()) { return html + eventsAgenda(byDate); }
+
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
     return list.slice(0, 4).map((e) =>
@@ -1132,6 +1135,44 @@ function eventsCalendar() {
     '<span><i class="swatch" style="background:#b07d2b"></i>Added by you</span>' +
     '<span class="muted">Click a day to add a show, or a show for its details.</span></div>';
   return html;
+}
+
+// Seven columns need roughly 900px to stay legible. Below that a month grid
+// gives each day about 50px, which cannot hold a venue name, so the same events
+// are listed by day instead.
+const NARROW = window.matchMedia("(max-width: 899px)");
+function isNarrow() { return NARROW.matches; }
+
+// Re-render when crossing the breakpoint so the right layout is always showing.
+NARROW.addEventListener("change", () => { if (DB) render(); });
+
+function eventsAgenda(byDate) {
+  const dates = Object.keys(byDate)
+    .filter((d) => d.slice(0, 7) === state.calMonth)
+    .sort();
+  if (!dates.length) {
+    return '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+      "Nothing listed for " + esc(monthLabelOf(state.calMonth)) + ".</p></div>";
+  }
+  const today = todayISO();
+  return dates.map((d) => {
+    const list = byDate[d].slice().sort((a, b) => (a.venue || "").localeCompare(b.venue || ""));
+    const day = parseISO(d);
+    return '<div class="agenda-day">' +
+      '<div class="agenda-date' + (d === today ? " is-today" : "") + '">' +
+      '<span class="agenda-dow">' + esc(day.toLocaleDateString(undefined, { weekday: "short" })) + "</span>" +
+      '<span class="agenda-num">' + esc(day.toLocaleDateString(undefined, { month: "short", day: "numeric" })) + "</span>" +
+      (d === today ? '<span class="agenda-dow">today</span>' : "") +
+      '<span class="agenda-count">' + list.length + " show" + (list.length === 1 ? "" : "s") + "</span></div>" +
+      list.map((e) =>
+        '<div class="agenda-row' + (e.manual ? " mine" : "") + '" data-act="show-event" data-id="' +
+        esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
+        '<div class="agenda-venue">' + esc(e.venue || e.name) + "</div>" +
+        (e.venue && e.name && e.name !== e.venue
+          ? '<div class="agenda-name">' + esc(e.name) + "</div>" : "") +
+        "</div></div>").join("") +
+      "</div>";
+  }).join("");
 }
 
 function eventsAgeHours() {

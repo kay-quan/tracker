@@ -299,7 +299,10 @@ td.actions .btn { margin-left: 4px; }
 
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, 1fr) not 1fr: a bare fr track floors at min-content, so a day
+     holding a long venue name widens its column and squeezes the rest. This
+     keeps all seven days exactly equal whatever is in them. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   background: var(--border);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -319,7 +322,7 @@ td.actions .btn { margin-left: 4px; }
 }
 .cal-day {
   background: var(--surface);
-  min-height: 104px;
+  min-height: 118px;
   padding: 6px;
   cursor: pointer;
   position: relative;
@@ -1255,3 +1258,52 @@ main .table-wrap table { min-width: 460px; }
 }
 .login-foot { color: var(--ink-3); font-size: 12.5px; margin-top: 16px; text-align: center; }
 body[data-view="login"] { padding-bottom: 0; }
+
+/* ---------- Calendar sizing ----------
+   A seven-column month grid needs width to be legible. Give the calendar
+   screen more of it, the same way the Today screen widens. */
+
+@media (min-width: 900px) {
+  body[data-view="calendar"] main { max-width: 1000px; }
+}
+
+/* Below that, seven columns would give each day about 50px — too narrow for a
+   venue name — so Local Events becomes a readable agenda instead. */
+
+.agenda-day {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.agenda-date {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 11px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.agenda-dow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 650; }
+.agenda-num { font-weight: 750; font-size: 16px; letter-spacing: -0.01em; }
+.agenda-count { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.agenda-date.is-today .agenda-num { color: var(--accent); }
+
+.agenda-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 14px;
+}
+.agenda-row:last-child { border-bottom: 0; }
+.agenda-row:hover { background: var(--surface-2); }
+.agenda-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 6px; background: #6f5bd1; }
+.agenda-row.mine .agenda-dot { background: #b07d2b; }
+.agenda-body { min-width: 0; flex: 1; }
+.agenda-venue { font-weight: 650; overflow-wrap: anywhere; }
+.agenda-name { color: var(--ink-3); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
