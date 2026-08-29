@@ -1124,11 +1124,13 @@ function eventsCalendar() {
 
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
-    return list.slice(0, 4).map((e) =>
+    return list.slice(0, 3).map((e) =>
       '<div class="cal-event ev-show' + (e.manual ? " ev-mine" : "") + '" data-act="show-event" data-id="' +
-      esc(e.id) + '" title="' + esc(e.name + (e.venue ? " \u2014 " + e.venue : "")) + '">' +
-      esc(e.venue || e.name) + "</div>").join("") +
-      (list.length > 4 ? '<div class="cal-more">+' + (list.length - 4) + " more</div>" : "");
+      esc(e.id) + '" title="' + esc(eventTooltip(e)) + '">' +
+      '<span class="ev-who">' + esc(eventWho(e)) + "</span>" +
+      (e.venue ? '<span class="ev-venue">' + esc(e.venue) + "</span>" : "") +
+      "</div>").join("") +
+      (list.length > 3 ? '<div class="cal-more">+' + (list.length - 3) + " more</div>" : "");
   }, "local-day");
 
   html += '<div class="legend"><span><i class="swatch" style="background:#6f5bd1"></i>From Edmtrain</span>' +
@@ -1167,12 +1169,30 @@ function eventsAgenda(byDate) {
       list.map((e) =>
         '<div class="agenda-row' + (e.manual ? " mine" : "") + '" data-act="show-event" data-id="' +
         esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
-        '<div class="agenda-venue">' + esc(e.venue || e.name) + "</div>" +
-        (e.venue && e.name && e.name !== e.venue
-          ? '<div class="agenda-name">' + esc(e.name) + "</div>" : "") +
+        '<div class="agenda-venue">' + esc(eventWho(e)) + "</div>" +
+        (e.venue ? '<div class="agenda-name">' + esc(e.venue) +
+          (e.ages ? " \u00b7 " + esc(e.ages) : "") + "</div>" : "") +
         "</div></div>").join("") +
       "</div>";
   }).join("");
+}
+
+// Who's playing, which is the thing worth reading at a glance. The lineup is
+// more useful than the event title, which is often just the venue's night name.
+function eventWho(e) {
+  const acts = (e.artists || []).filter(Boolean);
+  if (!acts.length) return e.name || "Show";
+  if (acts.length === 1) return acts[0];
+  if (acts.length === 2) return acts[0] + " + " + acts[1];
+  return acts[0] + " +" + (acts.length - 1) + " more";
+}
+
+// Everything about the show, for the hover tooltip.
+function eventTooltip(e) {
+  const acts = (e.artists || []).filter(Boolean);
+  return (acts.length ? acts.join(", ") : e.name || "Show") +
+    (e.venue ? "\n" + e.venue : "") +
+    (e.ages ? "\n" + e.ages : "");
 }
 
 function eventsAgeHours() {
@@ -1216,7 +1236,9 @@ function showEvent(id) {
   if (!e) return;
   const inPipeline = (DB.outreach || []).some((o) => o.venue && e.venue &&
     o.venue.toLowerCase() === e.venue.toLowerCase());
+  const acts = (e.artists || []).filter(Boolean);
   const body =
+    (acts.length ? '<p class="lineup">' + acts.map(esc).join(" \u00b7 ") + "</p>" : "") +
     '<p class="muted" style="margin-top:0">' + esc(fmtDateLong(e.date)) +
     (e.ages ? " \u00b7 " + esc(e.ages) : "") + (e.festival ? ' \u00b7 <span class="pill pill-amber">festival</span>' : "") + "</p>" +
     '<div class="field"><label>Venue</label><div class="strong">' + esc(e.venue || "\u2014") + "</div>" +

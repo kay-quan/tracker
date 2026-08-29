@@ -1307,3 +1307,38 @@ body[data-view="login"] { padding-bottom: 0; }
 .agenda-body { min-width: 0; flex: 1; }
 .agenda-venue { font-weight: 650; overflow-wrap: anywhere; }
 .agenda-name { color: var(--ink-3); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+
+/* ---------- Who's playing ----------
+   Each event in the month grid now carries two lines: the act on top, the
+   venue beneath. Both truncate independently so a long name can't push the
+   venue out of view. */
+
+.cal-event { white-space: normal; line-height: 1.25; padding: 4px 6px; }
+.ev-who {
+  display: block;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ev-venue {
+  display: block;
+  font-size: 10.5px;
+  opacity: 0.72;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Two-line events need more room than single-line ones did. */
+.cal-day { min-height: 142px; }
+
+/* The lineup, given top billing in the event popup. */
+.lineup {
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
