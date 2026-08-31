@@ -15,6 +15,11 @@
   --warn: #9a6a12;
   --warn-soft: #fdf3e0;
   --radius: 10px;
+  /* Vertical rhythm. Every screen spaces its blocks from these three steps,
+     rather than each view inventing its own margins. */
+  --gap-block: 10px;      /* between adjacent cards and rows */
+  --gap-section: 24px;    /* above a section heading */
+  --gap-head: 18px;       /* below a page heading */
   --shadow: 0 1px 2px rgba(28, 26, 23, 0.05), 0 4px 14px rgba(28, 26, 23, 0.05);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   color-scheme: light;
@@ -57,10 +62,12 @@ main {
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: var(--gap-head);
   flex-wrap: wrap;
 }
 .page-head h1 { font-size: 22px; margin: 0; letter-spacing: -0.02em; }
+/* A card that sits in a stack of cards. */
+.stack { margin-bottom: var(--gap-block); }
 .page-head p { margin: 4px 0 0; color: var(--ink-3); font-size: 13.5px; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -293,7 +300,7 @@ td.actions .btn { margin-left: 4px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: var(--gap-block);
 }
 .cal-head h2 { margin: 0; font-size: 18px; min-width: 190px; letter-spacing: -0.01em; }
 
@@ -359,7 +366,7 @@ td.actions .btn { margin-left: 4px; }
 .ev-completed { background: #eeece8; border-color: var(--ink-3); color: var(--ink-2); }
 .ev-cancelled { background: #f3f1ee; border-color: var(--border-strong); color: var(--ink-3); text-decoration: line-through; }
 
-.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; color: var(--ink-2); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: var(--gap-block); font-size: 12.5px; color: var(--ink-2); }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 
@@ -923,7 +930,7 @@ main { max-width: 660px; margin: 0 auto; padding: 6px 18px 40px; }
   letter-spacing: 0.08em;
   font-weight: 700;
   color: var(--ink-2);
-  margin: 26px 0 10px;
+  margin: var(--gap-section) 0 10px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -949,7 +956,7 @@ main { max-width: 660px; margin: 0 auto; padding: 6px 18px 40px; }
   border-left: 4px solid var(--ink-3);
   border-radius: 10px;
   padding: 14px 15px;
-  margin-bottom: 10px;
+  margin-bottom: var(--gap-block);
   box-shadow: var(--shadow);
 }
 .nudge-text { flex: 1; font-size: 14.5px; line-height: 1.45; }
@@ -1003,7 +1010,7 @@ main { max-width: 660px; margin: 0 auto; padding: 6px 18px 40px; }
 
 /* ---------- money hero ---------- */
 
-.hero { margin-bottom: 14px; }
+.hero { margin-bottom: var(--gap-block); }
 .hero-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .hero-num { font-size: 33px; font-weight: 800; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
 .hero-goal { color: var(--ink-3); font-size: 15px; }
@@ -1036,9 +1043,9 @@ a.hero-goal { color: var(--accent); text-decoration: underline; }
 .v-green { color: var(--money-in); }
 .v-amber { color: var(--warn); }
 
-.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: var(--gap-block) 0; }
 
-.month { margin-bottom: 10px; }
+.month { margin-bottom: var(--gap-block); }
 .month-name { font-weight: 700; font-size: 16px; margin-bottom: 8px; letter-spacing: -0.01em; }
 .month-total {
   display: flex;
@@ -1099,7 +1106,7 @@ a.hero-goal { color: var(--accent); text-decoration: underline; }
   border-left: 4px solid var(--ink-3);
   border-radius: 10px;
   padding: 14px 15px;
-  margin-bottom: 10px;
+  margin-bottom: var(--gap-block);
   box-shadow: var(--shadow);
 }
 .paycard-head {
@@ -1152,7 +1159,7 @@ a.hero-goal { color: var(--accent); text-decoration: underline; }
 
 /* ---------- filter chips ---------- */
 
-.chips { display: flex; gap: 7px; flex-wrap: wrap; margin: 14px 0 4px; }
+.chips { display: flex; gap: 7px; flex-wrap: wrap; margin: var(--gap-block) 0; }
 .chip {
   border: 1px solid var(--border-strong);
   background: var(--surface);
@@ -1274,7 +1281,7 @@ body[data-view="login"] { padding-bottom: 0; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  margin-bottom: 10px;
+  margin-bottom: var(--gap-block);
   overflow: hidden;
   box-shadow: var(--shadow);
 }
@@ -1365,4 +1372,18 @@ body[data-view="login"] { padding-bottom: 0; }
 @media (prefers-color-scheme: dark) {
   .ev-fest { background: #46243a; border-color: #e08bb0; color: #f2c3d6; }
   .tag-fest { background: #46243a; color: #f2c3d6; }
+}
+
+/* The first block on a screen never needs a top gap — the header above it
+   already provides one, and doubling up was what made pages start at
+   different heights. */
+main > :first-child { margin-top: 0; }
+main > .section-head:first-child { margin-top: 4px; }
+
+/* "Updated 2h ago" under the calendar heading. It used a negative top margin
+   to claw back space, which made the calendar the one screen out of step. */
+.feed-status {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 0 0 var(--gap-block);
 }

@@ -466,10 +466,10 @@ VIEWS.dashboard = function () {
 
   /* left column */
   html += "<div>";
-  html += '<div class="card card-pad" style="margin-bottom:16px">' +
+  html += '<div class="card card-pad stack">' +
     '<p class="card-title">In vs. out — ' + state.year + "</p>" + monthlyChart() + "</div>";
 
-  html += '<div class="card card-pad" style="margin-bottom:16px">' +
+  html += '<div class="card card-pad stack">' +
     '<p class="card-title">Upcoming gigs</p>';
   if (!upcoming.length) {
     html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing on the books yet. ' +
@@ -508,7 +508,7 @@ VIEWS.dashboard = function () {
 
   /* right column */
   html += "<div>";
-  html += '<div class="card card-pad todo-card" style="margin-bottom:16px">' + todoCard() + "</div>";
+  html += '<div class="card card-pad todo-card stack">' + todoCard() + "</div>";
   html += '<div class="card card-pad" style="margin-bottom:16px"><p class="card-title">Open invoices</p>';
   if (!open.length) {
     html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing outstanding. Nice.</p>';
@@ -1272,7 +1272,7 @@ function eventsStatusBar() {
     ? "just now"
     : age < 24 ? Math.round(age) + "h ago"
     : Math.round(age / 24) + " day" + (Math.round(age / 24) === 1 ? "" : "s") + " ago";
-  if (!stale) return '<p class="muted" style="font-size:12.5px;margin:-10px 0 16px">Updated ' + when + ".</p>";
+  if (!stale) return '<p class="feed-status">Updated ' + when + ".</p>";
   return '<div class="notice"><div><strong>Last updated ' + when + ".</strong> Edmtrain asks that their data " +
     "isn't shown more than 24 hours stale, so give it a refresh.</div>" +
     '<button class="btn btn-sm" data-act="refresh-events">Refresh now</button></div>';
@@ -1544,7 +1544,7 @@ VIEWS.invoices = function () {
     trio("Overdue", money0(sum(overdue)), "past the due date", overdue.length ? "red" : "") +
     "</div>";
 
-  html += '<div class="btn-row" style="margin:14px 0 4px">' +
+  html += '<div class="btn-row">' +
     '<button class="btn btn-primary" data-act="new-invoice">New invoice</button>' +
     (invs.length ? '<button class="btn" data-act="goto" data-view="clients">Clients</button>' : "") +
     "</div>";
@@ -2225,7 +2225,7 @@ VIEWS.outreach = function () {
     "</div>";
 
   if (due.length) {
-    html += '<div class="nudge tone-amber" style="margin-top:12px"><div class="nudge-text">' +
+    html += '<div class="nudge tone-amber"><div class="nudge-text">' +
       "<strong>" + due.length + " follow-up" + (due.length === 1 ? "" : "s") + " due</strong> \u2014 " +
       esc(due.slice(0, 2).map((r) => r.venue).join(", ")) +
       (due.length > 2 ? " and " + (due.length - 2) + " more" : "") + ".</div></div>";
@@ -2243,7 +2243,7 @@ VIEWS.outreach = function () {
     '" data-act="outreach-filter" data-key="' + f.key + '">' + esc(f.label) +
     '<span class="n">' + f.n + "</span></button>").join("") + "</div>";
 
-  html += '<div class="btn-row" style="margin:12px 0 4px">' +
+  html += '<div class="btn-row">' +
     '<button class="btn btn-primary" data-act="new-outreach">Add venue</button>' +
     '<button class="btn" data-act="refresh-events">Refresh local shows</button>' +
     '<button class="btn" data-act="goto" data-view="clients">Clients</button></div>';
@@ -2521,14 +2521,14 @@ VIEWS.settings = function () {
     '<p class="muted" style="font-size:13px;margin:0">Your next invoice will be <strong>' + esc(nextInvoiceNumber()) + "</strong>.</p>" +
     "</div>" +
 
-    '<div class="card card-pad" style="margin-bottom:16px">' +
+    '<div class="card card-pad stack">' +
     '<p class="card-title">Currency</p>' +
     '<div class="field-row">' +
     '<div class="field"><label>Code</label><input name="currency" value="' + esc(s.currency) + '"></div>' +
     '<div class="field"><label>Symbol</label><input name="currencySymbol" value="' + esc(s.currencySymbol) + '"></div>' +
     "</div></div>" +
 
-    '<div class="card card-pad" style="margin-bottom:16px">' +
+    '<div class="card card-pad stack">' +
     '<p class="card-title">Local shows (Edmtrain)</p>' +
     '<p class="muted" style="font-size:13.5px;margin-top:0">Edmtrain publishes a free API for ' +
     "personal use. Request a key, paste it here, and the Local Events calendar fills with " +
