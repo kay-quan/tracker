@@ -2585,6 +2585,9 @@ VIEWS.settings = function () {
       ? '<div class="sig-preview"><img src="' + esc(s.signature) + '" alt="Your signature">' +
         '<button type="button" class="btn btn-sm btn-danger" data-act="clear-signature">Remove</button></div>'
       : "") +
+    '<div class="sig-drop" id="sig-drop" tabindex="0">' +
+    "Paste an image here (\u2318V), or drop one in" +
+    "</div>" +
     '<input type="file" id="sig-file" accept="image/*"></div>' +
     '<div class="field"><label>Closing line on invoices</label>' +
     '<input name="invoiceFooter" value="' + esc(s.invoiceFooter) + '"></div>' +
@@ -2643,16 +2646,41 @@ VIEWS.settings = function () {
 
 VIEWS.settings.after = function () {
   const file = $("#sig-file");
+  const drop = $("#sig-drop");
   if (!file) return;
-  file.onchange = () => {
-    const f = file.files && file.files[0];
-    if (!f) return;
+
+  const take = (f) => {
+    if (!f || !/^image\//.test(f.type)) return;
     const reader = new FileReader();
     reader.onload = () => cleanSignature(reader.result)
       .then((clean) => { DB.settings.signature = clean; save(); render(); })
       .catch((err) => { alert("Could not read that image: " + err.message); });
     reader.readAsDataURL(f);
   };
+
+  file.onchange = () => take(file.files && file.files[0]);
+
+  if (!drop) return;
+  // Pasting is the shortest path when the signature is already on screen
+  // somewhere - copy the image, click here, press Cmd+V.
+  drop.addEventListener("paste", (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.type && it.type.indexOf("image") === 0) {
+        e.preventDefault();
+        take(it.getAsFile());
+        return;
+      }
+    }
+  });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+  drop.addEventListener("click", () => file.click());
 };
 
 // A signature cropped off a printed invoice arrives as dark ink sitting on a
