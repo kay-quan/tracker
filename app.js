@@ -1641,7 +1641,7 @@ VIEWS.invoices = function () {
         const first = g.rows[0];
         html += '<div class="paycard-actions">' +
           (g.client && g.client.email
-            ? '<button class="btn btn-sm btn-primary" data-act="copy-email" data-id="' + first.id + '">Copy email</button>'
+            ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft in Gmail</button>'
             : '<button class="btn btn-sm" data-act="edit-client-of" data-id="' + first.id + '">Add an email</button>') +
           '<button class="btn btn-sm" data-act="print-invoice" data-id="' + first.id + '">PDF</button>' +
           '<button class="btn btn-sm" data-act="mark-paid" data-id="' + first.id + '">Record payment</button>' +
@@ -1968,7 +1968,8 @@ function previewInvoice(id) {
     invoiceHTML(inv) + "</div>",
     '<button class="btn" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
     '<div class="spacer"></div>' +
-    '<button class="btn" data-act="copy-email" data-id="' + inv.id + '">Copy email text</button>' +
+    '<button class="btn" data-act="draft-gmail" data-id="' + inv.id + '">Draft in Gmail</button>' +
+    '<button class="btn" data-act="copy-email" data-id="' + inv.id + '">Copy text</button>' +
     '<button class="btn btn-primary" data-act="print-invoice" data-id="' + inv.id + '">Save as PDF</button>',
     { wide: true, noFocus: true });
 }
@@ -1981,6 +1982,24 @@ function printInvoice(id) {
   document.title = inv.number + (clientById(inv.clientId) ? " " + clientById(inv.clientId).name : "");
   window.print();
   setTimeout(() => { document.title = prevTitle; $("#invoice-print").innerHTML = ""; }, 800);
+}
+
+function emailSubject(inv) {
+  const s = DB.settings;
+  const who = s.businessName || s.yourName;
+  return "Invoice " + inv.number + (who ? " from " + who : "");
+}
+
+// Opens Gmail's compose window with everything filled in. Gmail has no way to
+// attach a file from a link, so the PDF still gets attached by hand - but the
+// address, subject and message are already there.
+function gmailComposeUrl(inv) {
+  const c = clientById(inv.clientId);
+  const to = (c && c.email) || "";
+  return "https://mail.google.com/mail/?view=cm&fs=1" +
+    "&to=" + encodeURIComponent(to) +
+    "&su=" + encodeURIComponent(emailSubject(inv)) +
+    "&body=" + encodeURIComponent(emailText(inv));
 }
 
 function emailText(inv) {
@@ -2882,6 +2901,21 @@ document.addEventListener("click", (e) => {
     case "preview-invoice": closeModal(); previewInvoice(id); break;
     case "save-invoice": saveInvoice(id, el.dataset.then); break;
     case "print-invoice": printInvoice(id); break;
+    case "draft-gmail": {
+      const inv = invoiceById(id);
+      if (!inv) break;
+      const c = clientById(inv.clientId);
+      if (!c || !c.email) {
+        openModal("No email for this client",
+          "<p>Add an email address for " + esc(c ? c.name : "this client") +
+          " and the message can be addressed automatically.</p>",
+          '<button class="btn" data-act="close-modal">Cancel</button>' +
+          '<button class="btn btn-primary" data-act="edit-client-of" data-id="' + inv.id + '">Add an email</button>');
+        break;
+      }
+      window.open(gmailComposeUrl(inv), "_blank", "noopener");
+      break;
+    }
     case "copy-email": copyEmail(id); break;
     case "mark-sent": {
       const inv = invoiceById(id);
