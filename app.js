@@ -113,6 +113,12 @@ function defaultData() {
       invoicePrefix: "INV-", nextInvoiceNumber: 1,
       invoiceFooter: "Thank you!",
       lateFeeNote: "Late fee will be applied if not paid by date.",
+      emailSubject: "Invoice {invoice} from {me}",
+      emailTemplate: "Hi {client},\n\n" +
+        "Please find attached invoice {invoice} for {total}, due {due}.\n\n" +
+        "{items}\n\n" +
+        "{payment}\n\n" +
+        "Any questions, just reply to this email.\n\nThanks,\n{me}",
       signature: "",
       incomeGoal: 0, edmtrainKey: "", eventCity: "Los Angeles",
       eventState: "California", eventLookaheadDays: 120,
@@ -1984,15 +1990,40 @@ function printInvoice(id) {
   setTimeout(() => { document.title = prevTitle; $("#invoice-print").innerHTML = ""; }, 800);
 }
 
-function emailSubject(inv) {
+// Placeholders the email template understands. Anything not applicable to a
+// given invoice resolves to an empty string rather than leaving {braces} behind.
+const EMAIL_TOKENS = [
+  { key: "client",  label: "who it's going to" },
+  { key: "invoice", label: "invoice number" },
+  { key: "total",   label: "amount due" },
+  { key: "due",     label: "due date" },
+  { key: "items",   label: "the line items, one per line" },
+  { key: "payment", label: "your payment details" },
+  { key: "me",      label: "your name" },
+];
+
+function fillTemplate(text, inv) {
   const s = DB.settings;
-  const who = s.businessName || s.yourName;
-  return "Invoice " + inv.number + (who ? " from " + who : "");
+  const c = clientById(inv.clientId);
+  const t = invoiceTotals(inv);
+  const values = {
+    client: (c && (c.contactName || c.name)) || "there",
+    invoice: inv.number || "",
+    total: money(t.total),
+    due: inv.dueDate ? fmtDate(inv.dueDate, { month: "long", day: "numeric", year: "numeric" }) : "",
+    items: (inv.items || []).filter((i) => i.description)
+      .map((i) => "  \u2022 " + i.description).join("\n"),
+    payment: s.paymentInstructions || "",
+    me: s.yourName || s.businessName || "",
+  };
+  return String(text || "").replace(/\{(\w+)\}/g, (whole, key) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? values[key] : whole);
 }
 
-// Opens Gmail's compose window with everything filled in. Gmail has no way to
-// attach a file from a link, so the PDF still gets attached by hand - but the
-// address, subject and message are already there.
+function emailSubject(inv) {
+  return fillTemplate(DB.settings.emailSubject || "Invoice {invoice} from {me}", inv).trim();
+}
+
 function gmailComposeUrl(inv) {
   const c = clientById(inv.clientId);
   const to = (c && c.email) || "";
@@ -2003,15 +2034,10 @@ function gmailComposeUrl(inv) {
 }
 
 function emailText(inv) {
-  const s = DB.settings;
-  const c = clientById(inv.clientId);
-  const t = invoiceTotals(inv);
-  return "Hi " + ((c && (c.contactName || c.name)) || "there") + ",\n\n" +
-    "Please find attached invoice " + inv.number + " for " + money(t.total) + "" +
-    (inv.dueDate ? ", due " + fmtDateLong(inv.dueDate) : "") + ".\n\n" +
-    (inv.items || []).filter((i) => i.description).map((i) => "  • " + i.description).join("\n") +
-    "\n\n" + (s.paymentInstructions ? s.paymentInstructions + "\n\n" : "") +
-    "Any questions, just reply to this email.\n\nThanks,\n" + (s.yourName || s.businessName || "");
+  return fillTemplate(DB.settings.emailTemplate || "", inv)
+    // A blank payment or items block shouldn't leave a hole in the message.
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /* ============================================================
@@ -2596,6 +2622,14 @@ VIEWS.settings = function () {
     "</div>" +
     '<div class="field"><label>Income goal for the year <span class="hint">net, 0 to hide</span></label>' +
     '<input type="number" name="incomeGoal" step="100" min="0" value="' + esc(s.incomeGoal) + '"></div>' +
+    '<div class="field"><label>Email subject</label>' +
+    '<input name="emailSubject" value="' + esc(s.emailSubject) + '"></div>' +
+    '<div class="field"><label>Email message <span class="hint">used by \u201cDraft in Gmail\u201d</span></label>' +
+    '<textarea name="emailTemplate" rows="10">' + esc(s.emailTemplate) + "</textarea>" +
+    '<div class="tokens">Drop these in and they fill themselves: ' +
+    EMAIL_TOKENS.map((tk) => '<code data-act="insert-token" data-token="' + tk.key +
+      '" title="' + esc(tk.label) + '">{' + tk.key + "}</code>").join(" ") +
+    "</div></div>" +
     '<div class="field"><label>Late fee note <span class="hint">printed in bold under the due date</span></label>' +
     '<input name="lateFeeNote" value="' + esc(s.lateFeeNote) + '"></div>' +
     '<div class="field"><label>Signature <span class="hint">a photo or crop of your signature \u2014 ' +
@@ -2777,6 +2811,7 @@ function saveSettings() {
     paymentTerms: num(v.paymentTerms), defaultTaxRate: num(v.defaultTaxRate),
     defaultHourlyRate: num(v.defaultHourlyRate), invoiceFooter: v.invoiceFooter.trim(),
     incomeGoal: num(v.incomeGoal), lateFeeNote: v.lateFeeNote.trim(),
+    emailSubject: v.emailSubject.trim(), emailTemplate: v.emailTemplate,
     invoicePrefix: v.invoicePrefix, nextInvoiceNumber: num(v.nextInvoiceNumber) || 1,
     currency: v.currency.trim(), currencySymbol: v.currencySymbol.trim() || "$",
     edmtrainKey: v.edmtrainKey.trim(), eventCity: v.eventCity.trim(),
@@ -3074,6 +3109,16 @@ document.addEventListener("click", (e) => {
 
     case "sign-out": signOutNow(); break;
     case "retry-load": start(); break;
+    case "insert-token": {
+      const box = $("[name=emailTemplate]");
+      if (!box) break;
+      const tag = "{" + el.dataset.token + "}";
+      const at = box.selectionStart == null ? box.value.length : box.selectionStart;
+      box.value = box.value.slice(0, at) + tag + box.value.slice(box.selectionEnd || at);
+      box.focus();
+      box.selectionStart = box.selectionEnd = at + tag.length;
+      break;
+    }
     case "clear-signature":
       DB.settings.signature = "";
       save(); render();
