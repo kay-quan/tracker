@@ -357,13 +357,17 @@ function renderHeader() {
   const today = new Date().toLocaleDateString(undefined,
     { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
+  // YTD and the weekly pace belong side by side - one says where you are, the
+  // other what it takes to land the year. The date drops to the quieter line.
   $("#app-meta").innerHTML =
-    '<span class="meta-line"><span class="muted">' + esc(today) + "</span>" +
-    '<span class="meta-stat">YTD net <strong>' + money(f.net) + "</strong></span></span>" +
     '<span class="meta-line">' +
+    '<span class="meta-stat">YTD net <strong>' + money(f.net) + "</strong></span>" +
     (f.goal
-      ? '<span class="meta-stat">Goal pace <strong>' + money(f.pace) + "</strong>/wk</span>"
+      ? '<span class="meta-stat" title="To reach ' + esc(money(f.goal)) + " by year end, with " +
+        f.weeksLeft.toFixed(1) + ' weeks to go">Goal pace <strong>' + money(f.pace) + "</strong>/wk</span>"
       : '<a href="#" class="meta-stat" data-act="set-goal">Set an income goal</a>') +
+    "</span>" +
+    '<span class="meta-line"><span class="muted">' + esc(today) + "</span>" +
     '<span class="live"><i></i>live</span></span>';
 }
 
