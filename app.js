@@ -983,7 +983,7 @@ VIEWS.money = function () {
   html += '<div class="btn-row">' +
     '<button class="btn" data-act="new-income">Log income</button>' +
     '<button class="btn" data-act="new-expense">Log expense</button>' +
-    '<button class="btn" data-act="goto" data-view="income">All income</button>' +
+    '<button class="btn" data-act="goto" data-view="income">Payments received</button>' +
     '<button class="btn" data-act="goto" data-view="expenses">All expenses</button></div>';
 
   html += '<h2 class="section-head">By month</h2>';
@@ -2070,40 +2070,71 @@ function emailText(inv) {
 
 VIEWS.income = function () {
   const r = periodRange();
-  const rows = DB.income.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const inPeriod = rows.filter((i) => inRange(i.date, r));
-  const total = inPeriod.reduce((s, i) => s + num(i.amount), 0);
+  const all = DB.income.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const rows = all.filter((i) => inRange(i.date, r));
+  const total = rows.reduce((s, i) => s + num(i.amount), 0);
+  const biggest = rows.reduce((m, i) => Math.max(m, num(i.amount)), 0);
 
-  let html =
-    '<div class="page-head"><div><h1>Income</h1><p>' + money(total) + " received in " + esc(r.label) +
-    ". Invoice payments land here automatically.</p></div>" +
-    '<div class="page-actions">' + periodPicker() +
-    '<button class="btn btn-primary" data-act="new-income">Log income</button></div></div>';
+  let html = '<div class="stat-trio">' +
+    trio("Received", money0(total), r.label.toLowerCase(), total ? "green" : "") +
+    trio("Payments", String(rows.length), rows.length === 1 ? "one payment" : "in this period", "") +
+    trio("Largest", money0(biggest), biggest ? "single payment" : "nothing yet", "") +
+    "</div>";
 
+  html += '<div class="btn-row">' + periodPicker() +
+    '<button class="btn btn-primary" data-act="new-income">Log a payment</button></div>';
+
+  if (!all.length) {
+    return html + '<div class="card empty"><h3>No payments recorded yet</h3>' +
+      "<p>Record a payment against an invoice and it appears here, or log money " +
+      "that came in some other way.</p>" +
+      '<button class="btn btn-primary" data-act="new-income">Log a payment</button></div>';
+  }
   if (!rows.length) {
-    return html + '<div class="card empty"><h3>No income logged yet</h3>' +
-      "<p>Record a payment on an invoice, or log money that came in some other way.</p>" +
-      '<button class="btn btn-primary" data-act="new-income">Log income</button></div>';
+    return html + '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+      "Nothing received in " + esc(r.label) + ".</p></div>";
   }
 
-  html += '<div class="card table-wrap"><table><thead><tr>' +
-    "<th>Date</th><th>From</th><th>Invoice</th><th>Method</th>" +
-    '<th class="num">Amount</th><th></th></tr></thead><tbody>';
-  inPeriod.forEach((i) => {
-    const inv = i.invoiceId ? invoiceById(i.invoiceId) : null;
-    html += "<tr><td>" + esc(fmtDate(i.date)) + "</td>" +
-      '<td><div class="strong">' + esc(i.clientId ? clientName(i.clientId) : i.source || "—") + "</div>" +
-      (i.notes ? '<div class="muted" style="font-size:12.5px">' + esc(i.notes) + "</div>" : "") + "</td>" +
-      "<td>" + (inv ? '<a href="#" data-act="preview-invoice" data-id="' + inv.id + '">' + esc(inv.number) + "</a>"
-        : '<span class="muted">—</span>') + "</td>" +
-      '<td class="muted">' + esc(i.method || "—") + "</td>" +
-      '<td class="num strong" style="color:var(--money-in)">' + money(i.amount) + "</td>" +
-      '<td class="actions"><button class="btn btn-sm" data-act="edit-income" data-id="' + i.id + '">Edit</button></td></tr>';
+  /* ---- grouped by month, newest first ---- */
+  const months = [];
+  const seen = {};
+  rows.forEach((i) => {
+    const key = (i.date || "").slice(0, 7);
+    if (!seen[key]) { seen[key] = { key, list: [], sum: 0 }; months.push(seen[key]); }
+    seen[key].list.push(i);
+    seen[key].sum += num(i.amount);
   });
-  if (!inPeriod.length) {
-    html += '<tr><td colspan="6" class="muted" style="text-align:center;padding:28px">Nothing in ' + esc(r.label) + ".</td></tr>";
+
+  months.forEach((m) => {
+    const [yy, mm] = m.key.split("-").map(Number);
+    const label = new Date(yy, mm - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    html += '<h2 class="section-head">' + esc(label) +
+      ' <span class="count">' + money(m.sum) + "</span></h2>";
+    html += '<div class="card">';
+    m.list.forEach((i) => {
+      const inv = i.invoiceId ? invoiceById(i.invoiceId) : null;
+      const who = i.clientId ? clientName(i.clientId) : (i.source || "Not attributed");
+      const bits = [];
+      if (i.method) bits.push(esc(i.method));
+      if (inv) bits.push(esc(inv.number));
+      if (i.notes) bits.push(esc(i.notes));
+      html += '<div class="payrow-full" data-act="edit-income" data-id="' + i.id + '">' +
+        '<span class="pay-when">' + esc(fmtDate(i.date, { month: "short", day: "numeric" })) + "</span>" +
+        '<span class="pay-who"><strong>' + esc(who) + "</strong>" +
+        (bits.length ? '<span class="pay-meta">' + bits.join(" \u00b7 ") + "</span>" : "") + "</span>" +
+        '<span class="pay-amt">' + money(i.amount) + "</span></div>";
+    });
+    html += "</div>";
+  });
+
+  /* ---- how the money arrived ---- */
+  const byMethod = groupSum(rows, (i) => i.method || "Not specified");
+  if (byMethod.length > 1) {
+    html += '<h2 class="section-head">How it arrived</h2>' +
+      '<div class="card card-pad">' +
+      breakdown(byMethod, "var(--money-in)", "") + "</div>";
   }
-  html += "</tbody></table></div>";
+
   return html;
 };
 VIEWS.income.after = periodPickerAfter;

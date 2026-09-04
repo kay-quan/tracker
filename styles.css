@@ -1469,3 +1469,34 @@ main > .section-head:first-child { margin-top: 4px; }
   font-size: 12px;
 }
 .tokens code:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Payment history rows ---------- */
+
+.payrow-full {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 14px;
+}
+.payrow-full:last-child { border-bottom: 0; }
+.payrow-full:hover { background: var(--surface-2); }
+
+.pay-when {
+  flex: 0 0 58px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pay-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pay-who strong { overflow-wrap: anywhere; }
+.pay-meta { color: var(--ink-3); font-size: 12.5px; overflow-wrap: anywhere; }
+.pay-amt {
+  margin-left: auto;
+  font-weight: 650;
+  color: var(--money-in);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
