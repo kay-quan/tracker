@@ -2973,7 +2973,21 @@ async function doSignIn() {
   }
 }
 
-function signOutNow() {
+async function signOutNow() {
+  // An edit may still be sitting in the 400ms debounce. Push it through before
+  // the session goes: otherwise the write fires with no token, throws, and that
+  // change is lost without the user ever being told.
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (dirty || saveInFlight || savePending) {
+    setSaveState("Saving\u2026", "saving");
+    try {
+      await flush();
+    } catch (err) {
+      // Offline, or the session already expired. Nothing more we can do here,
+      // and the local copy is still in data.json terms unchanged.
+    }
+  }
   Cloud.signOut();
   DB = null;
   renderLogin("Signed out.");
