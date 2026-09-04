@@ -424,92 +424,6 @@ td.actions .btn { margin-left: 4px; }
 
 #invoice-print { display: none; }
 
-.inv-doc {
-  background: #fff;
-  color: #1c1a17;
-  padding: 48px 52px;
-  font-size: 13.5px;
-  line-height: 1.55;
-}
-.inv-top { display: flex; justify-content: space-between; gap: 40px; margin-bottom: 38px; }
-.inv-from h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: -0.01em; }
-.inv-from div { color: #55504a; font-size: 13px; }
-.inv-meta { text-align: right; flex-shrink: 0; }
-.inv-meta .word {
-  font-size: 27px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: #b5b0a7;
-  font-weight: 640;
-  margin-bottom: 8px;
-}
-.inv-meta table { width: auto; margin-left: auto; font-size: 13px; }
-.inv-meta td { border: 0; padding: 2px 0 2px 18px; }
-.inv-meta td:first-child { color: #8a847b; padding-left: 0; }
-.inv-billto { margin-bottom: 30px; }
-.inv-billto .lbl {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: #8a847b;
-  font-weight: 640;
-  margin-bottom: 5px;
-}
-.inv-billto .who { font-weight: 640; font-size: 14.5px; }
-.inv-billto div { color: #55504a; }
-.inv-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
-.inv-table th {
-  border-bottom: 1.5px solid #1c1a17;
-  padding: 0 0 7px;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  color: #1c1a17;
-}
-.inv-table th.num, .inv-table td.num { text-align: right; }
-.inv-table td { border-bottom: 1px solid #e3e0da; padding: 10px 0; }
-.inv-table td.num { font-variant-numeric: tabular-nums; padding-left: 16px; }
-.inv-totals { width: 250px; margin-left: auto; font-size: 13.5px; }
-.inv-totals div { display: flex; justify-content: space-between; padding: 4px 0; font-variant-numeric: tabular-nums; }
-.inv-totals .grand {
-  border-top: 1.5px solid #1c1a17;
-  margin-top: 5px;
-  padding-top: 9px;
-  font-weight: 680;
-  font-size: 17px;
-}
-.inv-pay {
-  margin-top: 40px;
-  padding-top: 20px;
-  border-top: 1px solid #e3e0da;
-  display: flex;
-  gap: 44px;
-  flex-wrap: wrap;
-}
-.inv-pay .block { flex: 1; min-width: 190px; }
-.inv-pay .lbl {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: #8a847b;
-  font-weight: 640;
-  margin-bottom: 5px;
-}
-.inv-pay .body { white-space: pre-wrap; color: #55504a; }
-.inv-foot { margin-top: 34px; text-align: center; color: #8a847b; font-size: 12.5px; }
-
-.paid-stamp {
-  display: inline-block;
-  border: 2.5px solid var(--money-in);
-  color: var(--money-in);
-  padding: 3px 14px;
-  border-radius: 6px;
-  font-weight: 720;
-  letter-spacing: 0.14em;
-  font-size: 15px;
-  transform: rotate(-5deg);
-  margin-bottom: 10px;
-}
-
 @media print {
   body > *:not(#invoice-print) { display: none !important; }
   #invoice-print { display: block !important; }
@@ -1386,4 +1300,144 @@ main > .section-head:first-child { margin-top: 4px; }
   font-size: 12.5px;
   color: var(--ink-3);
   margin: 0 0 var(--gap-block);
+}
+
+/* ============================================================
+   INVOICE DOCUMENT
+   Follows Kevin's own invoice layout: cream ground, a display
+   serif masthead, hairline rules, and the signature block bottom
+   right. Deliberately fixed light colours — this is a document
+   that gets printed and emailed, so it must not follow the app's
+   dark theme.
+   ============================================================ */
+
+.inv-doc {
+  background: #f2f2ec;
+  color: #111;
+  padding: 62px 68px 56px;
+  font-size: 14px;
+  line-height: 1.5;
+  /* Didot and Bodoni ship with macOS, so the masthead renders without
+     pulling a webfont; Georgia is the safety net elsewhere. */
+  --display: "Didot", "Bodoni 72", "Bodoni MT", "Playfair Display", Georgia, serif;
+}
+
+.inv-word {
+  font-family: var(--display);
+  font-size: 62px;
+  line-height: 0.9;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  text-align: right;
+  margin-bottom: 58px;
+}
+
+/* Billed-to on the left, invoice number and date on the right. */
+.inv-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  margin-bottom: 62px;
+}
+.inv-ref { text-align: right; font-size: 15px; white-space: nowrap; }
+
+.inv-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+.inv-muted { color: #6b6b63; }
+.inv-paid {
+  display: inline-block;
+  margin-top: 10px;
+  border: 2px solid #1f6f5c;
+  color: #1f6f5c;
+  padding: 2px 12px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.inv-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+.inv-table th {
+  /* The app's global th styling is uppercase small-caps grey; the document
+     wants plain bold black, so every inherited property is reset here. */
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: #111;
+  padding: 12px 0;
+  border-top: 1px solid #111;
+  border-bottom: 1px solid #111;
+  text-align: left;
+  white-space: normal;
+}
+.inv-table td { padding: 18px 0; border-bottom: 1px solid #111; }
+.inv-table th.num, .inv-table td.num { text-align: right; padding-left: 22px; }
+.inv-table td.num { font-variant-numeric: tabular-nums; }
+.inv-table th:nth-child(2), .inv-table td:nth-child(2) { width: 15%; }
+.inv-table th:nth-child(3), .inv-table td:nth-child(3) { width: 17%; }
+.inv-table th:nth-child(4), .inv-table td:nth-child(4) { width: 17%; }
+
+.inv-sums { width: 330px; margin: 0 0 84px auto; }
+.inv-sums div {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 11px 0;
+  font-variant-numeric: tabular-nums;
+}
+.inv-sums div span:first-child { font-weight: 700; }
+.inv-sums div:last-of-type { border-bottom: 0; }
+.inv-grand {
+  border-top: 1px solid #111;
+  margin-top: 4px;
+  padding-top: 16px !important;
+  font-size: 25px;
+  font-weight: 700;
+}
+.inv-grand span:first-child { font-weight: 700; }
+
+.inv-foot { display: flex; justify-content: space-between; gap: 48px; align-items: flex-end; }
+.inv-foot-left { max-width: 58%; }
+.inv-foot-right { text-align: right; }
+
+.inv-thanks {
+  font-size: 30px;
+  letter-spacing: -0.01em;
+  margin-bottom: 42px;
+}
+.inv-pay { white-space: pre-wrap; margin-bottom: 4px; }
+.inv-strong { font-weight: 700; }
+.inv-note { margin-top: 12px; color: #4a4a44; white-space: pre-wrap; }
+
+.inv-sign { max-width: 250px; max-height: 120px; display: block; margin: 0 0 6px auto; }
+.inv-name { font-family: var(--display); font-size: 30px; line-height: 1.15; }
+.inv-from { color: #2b2b26; }
+
+@media (max-width: 700px) {
+  .inv-doc { padding: 30px 24px; }
+  .inv-word { font-size: 40px; }
+  .inv-top { flex-direction: column; gap: 20px; }
+  .inv-ref { text-align: left; }
+  .inv-sums { width: 100%; margin-bottom: 48px; }
+  .inv-foot { flex-direction: column; align-items: flex-start; gap: 34px; }
+  .inv-foot-left { max-width: 100%; }
+  .inv-foot-right { text-align: left; }
+  .inv-sign { margin-left: 0; }
+}
+
+.sig-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.sig-preview img {
+  max-height: 60px;
+  max-width: 200px;
+  background: #f2f2ec;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
 }

@@ -67,6 +67,17 @@ function fmtDate(iso, opts) {
   return d.toLocaleDateString(undefined, opts || { month: "short", day: "numeric", year: "numeric" });
 }
 
+function fmtDateOrdinal(iso) {
+  const d = parseISO(iso);
+  if (!d) return "";
+  const day = d.getDate();
+  // 11th/12th/13th are the exceptions to the 1st/2nd/3rd pattern.
+  const teen = day % 100 >= 11 && day % 100 <= 13;
+  const suffix = teen ? "th" : ["th", "st", "nd", "rd"][day % 10] || "th";
+  return d.toLocaleDateString(undefined, { month: "long" }) + " " + day +
+    '<sup>' + suffix + "</sup>, " + d.getFullYear();
+}
+
 function fmtDateLong(iso) {
   return fmtDate(iso, { weekday: "short", month: "long", day: "numeric", year: "numeric" });
 }
@@ -100,7 +111,9 @@ function defaultData() {
       taxId: "", currency: "USD", currencySymbol: "$", defaultTaxRate: 0,
       defaultHourlyRate: 0, paymentTerms: 14, paymentInstructions: "",
       invoicePrefix: "INV-", nextInvoiceNumber: 1,
-      invoiceFooter: "Thank you for your business!",
+      invoiceFooter: "Thank you!",
+      lateFeeNote: "Late fee will be applied if not paid by date.",
+      signature: "",
       incomeGoal: 0, edmtrainKey: "", eventCity: "Los Angeles",
       eventState: "California", eventLookaheadDays: 120,
     },
@@ -1837,13 +1850,13 @@ function invoiceHTML(inv, forPrint) {
   const st = invoiceStatus(inv);
   const paid = invoicePaid(inv);
 
-  const fromLines = [s.address, s.email, s.phone, s.website, s.taxId ? "Tax ID: " + s.taxId : ""]
-    .filter(Boolean).map((l) => "<div>" + esc(l).replace(/\n/g, "<br>") + "</div>").join("");
-
-  const toLines = c
-    ? [c.contactName, c.address, c.email, c.phone].filter(Boolean)
-        .map((l) => "<div>" + esc(l).replace(/\n/g, "<br>") + "</div>").join("")
-    : "";
+  const billedTo = [
+    c ? c.name : null,
+    c ? c.contactName : null,
+    c ? c.phone : null,
+    c ? c.address : null,
+    c ? c.email : null,
+  ].filter(Boolean);
 
   const rows = (inv.items || []).filter((it) => it.description || it.rate).map((it) =>
     "<tr><td>" + esc(it.description) + "</td>" +
@@ -1851,40 +1864,66 @@ function invoiceHTML(inv, forPrint) {
     '<td class="num">' + money(it.rate) + "</td>" +
     '<td class="num">' + money(num(it.qty) * num(it.rate)) + "</td></tr>").join("");
 
+  const from = [s.address, s.email, s.phone, s.website, s.taxId ? "Tax ID: " + s.taxId : ""]
+    .filter(Boolean);
+
   return '<div class="inv-doc">' +
+
+    // masthead, then billed-to on the left against the reference on the right
+    '<div class="inv-word">Invoice</div>' +
     '<div class="inv-top">' +
-    '<div class="inv-from"><h1>' + esc(s.businessName || s.yourName || "Your business") + "</h1>" +
-    (s.businessName && s.yourName ? "<div>" + esc(s.yourName) + "</div>" : "") +
-    fromLines + "</div>" +
-    '<div class="inv-meta">' +
-    (st === "paid" ? '<div class="paid-stamp">PAID</div>' : "") +
-    '<div class="word">Invoice</div><table><tbody>' +
-    "<tr><td>Number</td><td>" + esc(inv.number) + "</td></tr>" +
-    "<tr><td>Issued</td><td>" + esc(fmtDate(inv.issueDate)) + "</td></tr>" +
-    (inv.dueDate ? "<tr><td>Due</td><td>" + esc(fmtDate(inv.dueDate)) + "</td></tr>" : "") +
-    "</tbody></table></div></div>" +
-    '<div class="inv-billto"><div class="lbl">Bill to</div>' +
-    '<div class="who">' + esc(c ? c.name : "—") + "</div>" + toLines + "</div>" +
-    '<table class="inv-table"><thead><tr><th>Description</th>' +
-    '<th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>' +
-    "<tbody>" + rows + "</tbody></table>" +
-    '<div class="inv-totals">' +
-    "<div><span>Subtotal</span><span>" + money(t.subtotal) + "</span></div>" +
-    (t.discount ? "<div><span>Discount</span><span>-" + money(t.discount) + "</span></div>" : "") +
-    (t.tax ? "<div><span>Tax (" + num(inv.taxRate) + "%)</span><span>" + money(t.tax) + "</span></div>" : "") +
-    '<div class="grand"><span>' + (st === "paid" ? "Total paid" : "Amount due") + "</span><span>" + money(t.total) + "</span></div>" +
-    (paid > 0 && st !== "paid"
-      ? "<div><span>Received</span><span>-" + money(paid) + "</span></div>" +
-        '<div class="grand"><span>Balance</span><span>' + money(t.total - paid) + "</span></div>"
-      : "") +
+      '<div class="inv-billed">' +
+        '<div class="inv-label">Billed to:</div>' +
+        (billedTo.length
+          ? billedTo.map((l) => "<div>" + esc(l).replace(/\n/g, "<br>") + "</div>").join("")
+          : '<div class="inv-muted">No client set</div>') +
+        (st === "paid" ? '<div class="inv-paid">Paid</div>' : "") +
+      "</div>" +
+      '<div class="inv-ref">Invoice No. ' + esc(inv.number) + "<br>" +
+      fmtDateOrdinal(inv.issueDate) + "</div>" +
     "</div>" +
-    '<div class="inv-pay">' +
-    (s.paymentInstructions
-      ? '<div class="block"><div class="lbl">How to pay</div><div class="body">' + esc(s.paymentInstructions) + "</div></div>" : "") +
-    (inv.notes ? '<div class="block"><div class="lbl">Notes</div><div class="body">' + esc(inv.notes) + "</div></div>" : "") +
+
+    // line items
+    '<table class="inv-table"><thead><tr>' +
+      "<th>Item</th>" +
+      '<th class="num">Quantity</th>' +
+      '<th class="num">Unit Price</th>' +
+      '<th class="num">Total</th>' +
+    "</tr></thead><tbody>" + rows + "</tbody></table>" +
+
+    // totals
+    '<div class="inv-sums">' +
+      '<div><span>Subtotal</span><span>' + money(t.subtotal) + "</span></div>" +
+      (t.discount ? "<div><span>Discount</span><span>-" + money(t.discount) + "</span></div>" : "") +
+      "<div><span>Tax (" + num(inv.taxRate) + "%)</span><span>" + money(t.tax) + "</span></div>" +
+      '<div class="inv-grand"><span>Total</span><span>' + money(t.total) + "</span></div>" +
+      (paid > 0 && st !== "paid"
+        ? "<div><span>Received</span><span>-" + money(paid) + "</span></div>" +
+          '<div class="inv-grand"><span>Balance</span><span>' + money(t.total - paid) + "</span></div>"
+        : "") +
     "</div>" +
-    (s.invoiceFooter ? '<div class="inv-foot">' + esc(s.invoiceFooter) + "</div>" : "") +
-    "</div>";
+
+    // closing
+    '<div class="inv-foot">' +
+      '<div class="inv-foot-left">' +
+        (s.invoiceFooter ? '<div class="inv-thanks">' + esc(s.invoiceFooter) + "</div>" : "") +
+        '<div class="inv-label">Payment information</div>' +
+        (s.paymentInstructions
+          ? '<div class="inv-pay">' + esc(s.paymentInstructions) + "</div>"
+          : '<div class="inv-muted">Add payment details in Settings</div>') +
+        (inv.dueDate
+          ? '<div class="inv-strong">Pay by: ' + fmtDateOrdinal(inv.dueDate) + "</div>" : "") +
+        (s.lateFeeNote ? '<div class="inv-strong">' + esc(s.lateFeeNote) + "</div>" : "") +
+        (inv.notes ? '<div class="inv-note">' + esc(inv.notes) + "</div>" : "") +
+      "</div>" +
+      '<div class="inv-foot-right">' +
+        (s.signature ? '<img class="inv-sign" src="' + esc(s.signature) + '" alt="">' : "") +
+        '<div class="inv-name">' + esc(s.yourName || s.businessName || "") + "</div>" +
+        from.map((l) => '<div class="inv-from">' + esc(l).replace(/\n/g, "<br>") + "</div>").join("") +
+      "</div>" +
+    "</div>" +
+
+  "</div>";
 }
 
 function previewInvoice(id) {
@@ -2508,6 +2547,14 @@ VIEWS.settings = function () {
     "</div>" +
     '<div class="field"><label>Income goal for the year <span class="hint">net, 0 to hide</span></label>' +
     '<input type="number" name="incomeGoal" step="100" min="0" value="' + esc(s.incomeGoal) + '"></div>' +
+    '<div class="field"><label>Late fee note <span class="hint">printed in bold under the due date</span></label>' +
+    '<input name="lateFeeNote" value="' + esc(s.lateFeeNote) + '"></div>' +
+    '<div class="field"><label>Signature <span class="hint">an image of your signature, optional</span></label>' +
+    (s.signature
+      ? '<div class="sig-preview"><img src="' + esc(s.signature) + '" alt="Your signature">' +
+        '<button type="button" class="btn btn-sm btn-danger" data-act="clear-signature">Remove</button></div>'
+      : "") +
+    '<input type="file" id="sig-file" accept="image/*"></div>' +
     '<div class="field"><label>Closing line on invoices</label>' +
     '<input name="invoiceFooter" value="' + esc(s.invoiceFooter) + '"></div>' +
     "</div></div>" +
@@ -2563,6 +2610,27 @@ VIEWS.settings = function () {
     "</div></form>";
 };
 
+VIEWS.settings.after = function () {
+  const file = $("#sig-file");
+  if (!file) return;
+  file.onchange = () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    if (f.size > 400 * 1024) {
+      alert("That image is over 400KB. A small PNG of your signature works best.");
+      file.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      DB.settings.signature = reader.result;   // stored inline, no file hosting needed
+      save();
+      render();
+    };
+    reader.readAsDataURL(f);
+  };
+};
+
 function saveSettings() {
   const v = formValues($("#settings-form"));
   Object.assign(DB.settings, {
@@ -2572,7 +2640,7 @@ function saveSettings() {
     paymentInstructions: v.paymentInstructions.trim(),
     paymentTerms: num(v.paymentTerms), defaultTaxRate: num(v.defaultTaxRate),
     defaultHourlyRate: num(v.defaultHourlyRate), invoiceFooter: v.invoiceFooter.trim(),
-    incomeGoal: num(v.incomeGoal),
+    incomeGoal: num(v.incomeGoal), lateFeeNote: v.lateFeeNote.trim(),
     invoicePrefix: v.invoicePrefix, nextInvoiceNumber: num(v.nextInvoiceNumber) || 1,
     currency: v.currency.trim(), currencySymbol: v.currencySymbol.trim() || "$",
     edmtrainKey: v.edmtrainKey.trim(), eventCity: v.eventCity.trim(),
@@ -2845,6 +2913,10 @@ document.addEventListener("click", (e) => {
 
     case "sign-out": signOutNow(); break;
     case "retry-load": start(); break;
+    case "clear-signature":
+      DB.settings.signature = "";
+      save(); render();
+      break;
     case "save-settings": saveSettings(); break;
     case "export-json": download("income-tracker-" + todayISO() + ".json", JSON.stringify(DB, null, 2), "application/json"); break;
     case "export-income": exportIncome(); break;
