@@ -2579,7 +2579,8 @@ VIEWS.settings = function () {
     '<input type="number" name="incomeGoal" step="100" min="0" value="' + esc(s.incomeGoal) + '"></div>' +
     '<div class="field"><label>Late fee note <span class="hint">printed in bold under the due date</span></label>' +
     '<input name="lateFeeNote" value="' + esc(s.lateFeeNote) + '"></div>' +
-    '<div class="field"><label>Signature <span class="hint">an image of your signature, optional</span></label>' +
+    '<div class="field"><label>Signature <span class="hint">a photo or crop of your signature \u2014 ' +
+    'the background is removed automatically</span></label>' +
     (s.signature
       ? '<div class="sig-preview"><img src="' + esc(s.signature) + '" alt="Your signature">' +
         '<button type="button" class="btn btn-sm btn-danger" data-act="clear-signature">Remove</button></div>'
@@ -2646,20 +2647,78 @@ VIEWS.settings.after = function () {
   file.onchange = () => {
     const f = file.files && file.files[0];
     if (!f) return;
-    if (f.size > 400 * 1024) {
-      alert("That image is over 400KB. A small PNG of your signature works best.");
-      file.value = "";
-      return;
-    }
     const reader = new FileReader();
-    reader.onload = () => {
-      DB.settings.signature = reader.result;   // stored inline, no file hosting needed
-      save();
-      render();
-    };
+    reader.onload = () => cleanSignature(reader.result)
+      .then((clean) => { DB.settings.signature = clean; save(); render(); })
+      .catch((err) => { alert("Could not read that image: " + err.message); });
     reader.readAsDataURL(f);
   };
 };
+
+// A signature cropped off a printed invoice arrives as dark ink sitting on a
+// paper-coloured rectangle. Pasted onto the invoice it would show as a visible
+// box, so: drop the paper to transparent, keep the ink (with its soft edges),
+// and trim to what's actually drawn.
+function cleanSignature(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error("not an image"));
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return reject(new Error("empty image"));
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+
+      let px;
+      try {
+        px = ctx.getImageData(0, 0, w, h);
+      } catch (err) {
+        return resolve(dataUrl);           // tainted canvas; keep the original
+      }
+      const d = px.data;
+
+      // Bounds of the ink, so the result is trimmed to the signature itself.
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const lum = 0.2126 * d[i] + 0.7152 * d[i+1] + 0.0722 * d[i+2];
+          let alpha;
+          if (lum >= 235) alpha = 0;                        // paper
+          else if (lum <= 120) alpha = 255;                 // solid ink
+          else alpha = Math.round(255 * (235 - lum) / 115); // anti-aliased edge
+          alpha = Math.min(alpha, d[i+3]);                  // respect existing transparency
+          d[i+3] = alpha;
+          if (alpha > 24) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) return reject(new Error("that image looks blank"));
+
+      ctx.putImageData(px, 0, 0);
+      const pad = 6;
+      minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+      maxX = Math.min(w - 1, maxX + pad); maxY = Math.min(h - 1, maxY + pad);
+      let cw = maxX - minX + 1, ch = maxY - minY + 1;
+
+      // Keep it a sensible size for an inline data URL.
+      const maxW = 600;
+      const scale = cw > maxW ? maxW / cw : 1;
+      const out = document.createElement("canvas");
+      out.width = Math.round(cw * scale);
+      out.height = Math.round(ch * scale);
+      out.getContext("2d").drawImage(cv, minX, minY, cw, ch, 0, 0, out.width, out.height);
+      resolve(out.toDataURL("image/png"));
+    };
+    img.src = dataUrl;
+  });
+}
 
 function saveSettings() {
   const v = formValues($("#settings-form"));
