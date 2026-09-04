@@ -1609,6 +1609,7 @@ VIEWS.invoices = function () {
         '<div class="paycard-actions">' +
         '<button class="btn btn-sm btn-primary" data-act="preview-invoice" data-id="' + inv.id + '">View / PDF</button>' +
         '<button class="btn btn-sm" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
+        '<button class="btn btn-sm" data-act="draft-gmail" data-id="' + inv.id + '">Draft email</button>' +
         '<button class="btn btn-sm" data-act="mark-sent" data-id="' + inv.id + '">Mark as sent</button>' +
         "</div></div>";
     });
@@ -1647,7 +1648,7 @@ VIEWS.invoices = function () {
         const first = g.rows[0];
         html += '<div class="paycard-actions">' +
           (g.client && g.client.email
-            ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft in Gmail</button>'
+            ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft email</button>'
             : '<button class="btn btn-sm" data-act="edit-client-of" data-id="' + first.id + '">Add an email</button>') +
           '<button class="btn btn-sm" data-act="print-invoice" data-id="' + first.id + '">PDF</button>' +
           '<button class="btn btn-sm" data-act="mark-paid" data-id="' + first.id + '">Record payment</button>' +
@@ -1763,6 +1764,7 @@ function invoiceEditor(id) {
     '<div class="spacer"></div>' +
     (st !== "paid"
       ? '<button class="btn" data-act="mark-paid" data-id="' + inv.id + '">Record payment</button>' : "") +
+    '<button class="btn" data-act="save-invoice" data-id="' + inv.id + '" data-then="draft">Save &amp; draft email</button>' +
     '<button class="btn" data-act="save-invoice" data-id="' + inv.id + '" data-then="preview">Save &amp; view</button>' +
     '<button class="btn btn-primary" data-act="save-invoice" data-id="' + inv.id + '">Save</button>';
 
@@ -1839,6 +1841,7 @@ function saveInvoice(id, then) {
   save();
   closeModal();
   if (then === "preview") previewInvoice(id);
+  else if (then === "draft") openGmailDraft(id);
   else render();
 }
 
@@ -1974,7 +1977,7 @@ function previewInvoice(id) {
     invoiceHTML(inv) + "</div>",
     '<button class="btn" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
     '<div class="spacer"></div>' +
-    '<button class="btn" data-act="draft-gmail" data-id="' + inv.id + '">Draft in Gmail</button>' +
+    '<button class="btn" data-act="draft-gmail" data-id="' + inv.id + '">Draft email</button>' +
     '<button class="btn" data-act="copy-email" data-id="' + inv.id + '">Copy text</button>' +
     '<button class="btn btn-primary" data-act="print-invoice" data-id="' + inv.id + '">Save as PDF</button>',
     { wide: true, noFocus: true });
@@ -2018,6 +2021,23 @@ function fillTemplate(text, inv) {
   };
   return String(text || "").replace(/\{(\w+)\}/g, (whole, key) =>
     Object.prototype.hasOwnProperty.call(values, key) ? values[key] : whole);
+}
+
+// Opens a Gmail draft for an invoice, or asks for the client's email first.
+function openGmailDraft(id) {
+  const inv = invoiceById(id);
+  if (!inv) return;
+  const c = clientById(inv.clientId);
+  if (!c || !c.email) {
+    openModal("No email for this client",
+      "<p>Add an email address for " + esc(c ? c.name : "this client") +
+      " and the message can be addressed automatically.</p>",
+      '<button class="btn" data-act="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" data-act="edit-client-of" data-id="' + inv.id + '">Add an email</button>');
+    return;
+  }
+  window.open(gmailComposeUrl(inv), "_blank", "noopener");
+  render();
 }
 
 function emailSubject(inv) {
@@ -2936,21 +2956,7 @@ document.addEventListener("click", (e) => {
     case "preview-invoice": closeModal(); previewInvoice(id); break;
     case "save-invoice": saveInvoice(id, el.dataset.then); break;
     case "print-invoice": printInvoice(id); break;
-    case "draft-gmail": {
-      const inv = invoiceById(id);
-      if (!inv) break;
-      const c = clientById(inv.clientId);
-      if (!c || !c.email) {
-        openModal("No email for this client",
-          "<p>Add an email address for " + esc(c ? c.name : "this client") +
-          " and the message can be addressed automatically.</p>",
-          '<button class="btn" data-act="close-modal">Cancel</button>' +
-          '<button class="btn btn-primary" data-act="edit-client-of" data-id="' + inv.id + '">Add an email</button>');
-        break;
-      }
-      window.open(gmailComposeUrl(inv), "_blank", "noopener");
-      break;
-    }
+    case "draft-gmail": closeModal(); openGmailDraft(id); break;
     case "copy-email": copyEmail(id); break;
     case "mark-sent": {
       const inv = invoiceById(id);
