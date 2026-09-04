@@ -1549,7 +1549,10 @@ VIEWS.invoices = function () {
   const drafts = byStatus("draft");
   const waiting = invs.filter((inv) => ["sent", "partial"].includes(invoiceStatus(inv)));
   const overdue = byStatus("overdue");
-  const owing = invs.filter((inv) => !["paid"].includes(invoiceStatus(inv)) && invoiceTotals(inv).total > 0);
+  const owing = invs.filter((inv) => {
+    const st = invoiceStatus(inv);
+    return st !== "paid" && st !== "draft" && invoiceTotals(inv).total > 0;
+  });
 
   let html = '<div class="stat-trio">' +
     trio("Not sent yet", money0(sum(drafts)), "you control this", drafts.length ? "amber" : "") +
@@ -1578,6 +1581,33 @@ VIEWS.invoices = function () {
     groups.set(key, g);
   });
 
+  /* ---- saved but not sent ---- */
+  const draftValue = drafts.reduce((sum, inv) => sum + invoiceTotals(inv).total, 0);
+  html += '<h2 class="section-head">Not sent yet' +
+    (drafts.length ? ' <span class="count">' + money(draftValue) + " across " + drafts.length +
+      " invoice" + (drafts.length === 1 ? "" : "s") + "</span>" : "") + "</h2>";
+
+  if (!drafts.length) {
+    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+      "Nothing waiting to go out. Every invoice you've written has been sent.</p></div>";
+  } else {
+    drafts.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
+      const value = invoiceTotals(inv).total;
+      html += '<div class="paycard tone-amber">' +
+        '<div class="paycard-head"><span class="paycard-who">' +
+        esc(clientName(inv.clientId)) + "</span>" +
+        '<span class="pill pill-gray">' + esc(inv.number) + "</span>" +
+        '<span class="paycard-amt">' + money(value) + "</span></div>" +
+        '<p class="paycard-note" style="margin-top:8px">Written ' +
+        esc(fmtDate(inv.issueDate)) + " \u00b7 not sent to the client yet.</p>" +
+        '<div class="paycard-actions">' +
+        '<button class="btn btn-sm btn-primary" data-act="preview-invoice" data-id="' + inv.id + '">View / PDF</button>' +
+        '<button class="btn btn-sm" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
+        '<button class="btn btn-sm" data-act="mark-sent" data-id="' + inv.id + '">Mark as sent</button>' +
+        "</div></div>";
+    });
+  }
+
   const totalOwed = owing.reduce((s, inv) => s + (invoiceTotals(inv).total - invoicePaid(inv)), 0);
   html += '<h2 class="section-head">Get paid' +
     (owing.length ? ' <span class="count">' + money(totalOwed) + " across " + groups.size +
@@ -1585,7 +1615,7 @@ VIEWS.invoices = function () {
 
   if (!owing.length) {
     html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
-      "Everything is paid. Nothing to chase.</p></div>";
+      "Nothing outstanding. Everything you've sent has been paid.</p></div>";
   } else {
     Array.from(groups.values())
       .sort((a, b) => b.total - a.total)
@@ -2766,6 +2796,16 @@ document.addEventListener("click", (e) => {
     case "save-invoice": saveInvoice(id, el.dataset.then); break;
     case "print-invoice": printInvoice(id); break;
     case "copy-email": copyEmail(id); break;
+    case "mark-sent": {
+      const inv = invoiceById(id);
+      if (!inv) break;
+      inv.status = "sent";
+      inv.sentDate = todayISO();
+      // Give it a due date if it never got one, so it can go overdue properly.
+      if (!inv.dueDate) inv.dueDate = addDays(todayISO(), num(DB.settings.paymentTerms) || 14);
+      save(); render();
+      break;
+    }
     case "mark-paid": closeModal(); markPaidDialog(id); break;
     case "confirm-payment": {
       const inv = invoiceById(id);
