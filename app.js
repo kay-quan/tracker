@@ -2418,6 +2418,7 @@ VIEWS.outreach = function () {
 
   html += '<div class="btn-row">' +
     '<button class="btn btn-primary" data-act="new-outreach">Add venue</button>' +
+    '<button class="btn" data-act="import-lineup">Add a lineup</button>' +
     '<button class="btn" data-act="refresh-events">Refresh local shows</button>' +
     '<button class="btn" data-act="goto" data-view="clients">Clients</button></div>';
 
@@ -2441,32 +2442,33 @@ VIEWS.outreach = function () {
       "Nothing at this stage.</p></div>";
   } else {
     const order = OUTREACH_STATUSES.map((x) => x.value);
-    active.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) ||
-      (a.venue || "").localeCompare(b.venue || ""));
+    // Numeric-aware compare so an act like "999999999" sorts sensibly.
+    const byName = (a, b) => (a.venue || "").localeCompare(b.venue || "",
+      undefined, { numeric: true, sensitivity: "base" });
+
+    // Anyone tied to a festival is grouped under it, alphabetically. Everyone
+    // else keeps the old status ordering underneath.
+    const groups = new Map();
+    const loose = [];
     active.forEach((r) => {
-      const overdue = r.nextFollowUp && r.nextFollowUp <= today &&
-        !["booked", "passed"].includes(r.status);
-      html += '<div class="paycard ' + (overdue ? "tone-red" : "tone-green") +
-        '" data-act="edit-outreach" data-id="' + r.id + '" style="cursor:pointer">' +
-        '<div class="paycard-head" style="border-bottom:0;padding-bottom:0">' +
-        '<span class="paycard-who">' + esc(r.venue || "\u2014") + "</span>" +
-        (r.kind === "artist" ? '<span class="pill pill-blue">artist</span>' : "") +
-        '<span class="pill ' + outreachPill(r.status) + '">' + esc(outreachLabel(r.status)) + "</span>" +
-        "</div>";
-      const bits = [];
-      if (r.contactName) bits.push(esc(r.contactName));
-      if (r.email) bits.push(esc(r.email));
-      if (r.phone) bits.push(esc(r.phone));
-      if (bits.length) html += '<p class="paycard-note" style="margin-top:8px">' + bits.join(" \u00b7 ") + "</p>";
-      const when = [];
-      if (r.lastContact) when.push("last contact " + esc(fmtDate(r.lastContact, { month: "short", day: "numeric" })));
-      if (r.nextFollowUp) {
-        when.push((overdue ? "<strong>follow up " : "follow up ") +
-          esc(fmtDate(r.nextFollowUp, { month: "short", day: "numeric" })) + (overdue ? "</strong>" : ""));
-      }
-      if (when.length) html += '<p class="paycard-note" style="margin-top:4px">' + when.join(" \u00b7 ") + "</p>";
-      html += "</div>";
+      if (r.festival) {
+        if (!groups.has(r.festival)) groups.set(r.festival, []);
+        groups.get(r.festival).push(r);
+      } else loose.push(r);
     });
+
+    Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
+      const list = groups.get(fest).sort(byName);
+      const toContact = list.filter((r) => r.status === "to-contact").length;
+      html += '<h3 class="fest-head">' + esc(fest) +
+        ' <span class="count">' + list.length + " act" + (list.length === 1 ? "" : "s") +
+        (toContact ? " \u00b7 " + toContact + " to contact" : "") + "</span></h3>";
+      list.forEach((r) => { html += outreachCard(r, today); });
+    });
+
+    loose.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || byName(a, b));
+    if (loose.length && groups.size) html += '<h3 class="fest-head">Everyone else</h3>';
+    loose.forEach((r) => { html += outreachCard(r, today); });
   }
 
   /* ---- venues from the local shows feed ---- */
@@ -2537,10 +2539,94 @@ function addLineupToOutreach(ev) {
     '<button class="btn btn-primary" data-act="close-modal">Done</button>', { noFocus: true });
 }
 
+// Bulk-add a bill: paste the names, tag them all with the festival.
+function importLineupDialog() {
+  const known = Array.from(new Set((DB.outreach || []).map((o) => o.festival).filter(Boolean)));
+  openModal("Add a lineup",
+    '<form id="lineup-form">' +
+    '<div class="field"><label>Festival or event</label>' +
+    '<input name="festival" placeholder="Escape Psycho Circus 2026" list="fest-known" required>' +
+    '<datalist id="fest-known">' + known.map((f) => '<option value="' + esc(f) + '">').join("") +
+    "</datalist></div>" +
+    '<div class="field"><label>Acts <span class="hint">one per line, or separated by commas</span></label>' +
+    '<textarea name="names" rows="12" placeholder="A Little Sound&#10;Adam Ten&#10;All The Reason"></textarea></div>' +
+    '<p class="muted" style="font-size:13px;margin:0">Anyone already in your pipeline is left alone. ' +
+    "Every new act is added as <em>to contact</em>.</p></form>",
+    '<button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="save-lineup">Add them</button>', { wide: true });
+}
+
+function saveLineup() {
+  const v = formValues($("#lineup-form"));
+  const festival = (v.festival || "").trim();
+  if (!festival) { alert("Give the festival a name."); return; }
+
+  // Split on newlines or commas, drop blanks and stray bullets.
+  const names = (v.names || "")
+    .split(/[\n,]+/)
+    .map((n) => n.replace(/^[\s•\-\u2022]+/, "").trim())
+    .filter(Boolean);
+  if (!names.length) { alert("Paste the acts first."); return; }
+
+  DB.outreach = DB.outreach || [];
+  const have = new Set(DB.outreach.map((o) => (o.venue || "").trim().toLowerCase()));
+  const added = [], skipped = [];
+  names.forEach((name) => {
+    const key = name.toLowerCase();
+    if (have.has(key)) { skipped.push(name); return; }
+    have.add(key);
+    added.push(name);
+    DB.outreach.push({
+      id: uid(), venue: name, kind: "artist", festival: festival,
+      contactName: "", email: "", phone: "", website: "",
+      status: "to-contact", lastContact: "", nextFollowUp: "",
+      notes: "Playing " + festival + ".",
+    });
+  });
+
+  if (added.length) save();
+  closeModal();
+  state.view = "outreach"; state.outreachFilter = "";
+  render();
+  openModal("Lineup added",
+    "<p><strong>" + added.length + " act" + (added.length === 1 ? "" : "s") +
+    "</strong> added under <strong>" + esc(festival) + "</strong>, sorted alphabetically.</p>" +
+    (skipped.length
+      ? '<p class="muted" style="font-size:13px">Already in your pipeline, left as they were: ' +
+        esc(skipped.join(", ")) + "</p>"
+      : ""),
+    '<button class="btn btn-primary" data-act="close-modal">Done</button>', { noFocus: true });
+}
+
+function outreachCard(r, today) {
+  const overdue = r.nextFollowUp && r.nextFollowUp <= today &&
+    !["booked", "passed"].includes(r.status);
+  let html = '<div class="paycard ' + (overdue ? "tone-red" : "tone-green") +
+    '" data-act="edit-outreach" data-id="' + r.id + '" style="cursor:pointer">' +
+    '<div class="paycard-head" style="border-bottom:0;padding-bottom:0">' +
+    '<span class="paycard-who">' + esc(r.venue || "\u2014") + "</span>" +
+    (r.kind === "artist" ? '<span class="pill pill-blue">artist</span>' : "") +
+    '<span class="pill ' + outreachPill(r.status) + '">' + esc(outreachLabel(r.status)) + "</span>" +
+    "</div>";
+  const bits = [];
+  if (r.contactName) bits.push(esc(r.contactName));
+  if (r.email) bits.push(esc(r.email));
+  if (r.phone) bits.push(esc(r.phone));
+  if (bits.length) html += '<p class="paycard-note" style="margin-top:8px">' + bits.join(" \u00b7 ") + "</p>";
+  const when = [];
+  if (r.lastContact) when.push("last contact " + esc(fmtDate(r.lastContact, { month: "short", day: "numeric" })));
+  if (r.nextFollowUp) {
+    when.push((overdue ? "<strong>follow up " : "follow up ") +
+      esc(fmtDate(r.nextFollowUp, { month: "short", day: "numeric" })) + (overdue ? "</strong>" : ""));
+  }
+  if (when.length) html += '<p class="paycard-note" style="margin-top:4px">' + when.join(" \u00b7 ") + "</p>";
+  return html + "</div>";
+}
+
 function outreachForm(rec) {
   const r = rec || {
-    id: null, venue: "", kind: "venue", contactName: "", email: "", phone: "", website: "",
-    status: "to-contact", lastContact: "", nextFollowUp: "", notes: "",
+    id: null, venue: "", kind: "venue", festival: "", contactName: "", email: "",
+    phone: "", website: "", status: "to-contact", lastContact: "", nextFollowUp: "", notes: "",
   };
   const body =
     '<form id="outreach-form">' +
@@ -2561,6 +2647,13 @@ function outreachForm(rec) {
     '<input name="phone" value="' + esc(r.phone) + '"></div>' +
     '<div class="field"><label>Website <span class="hint">optional</span></label>' +
     '<input name="website" value="' + esc(r.website) + '"></div>' +
+    "</div>" +
+    '<div class="field-row">' +
+    '<div class="field"><label>Festival or event <span class="hint">groups them together</span></label>' +
+    '<input name="festival" value="' + esc(r.festival || "") + '" list="festival-list">' +
+    '<datalist id="festival-list">' +
+    Array.from(new Set((DB.outreach || []).map((o) => o.festival).filter(Boolean)))
+      .map((f) => '<option value="' + esc(f) + '">').join("") + "</datalist></div>" +
     "</div>" +
     '<div class="field-row-3">' +
     '<div class="field"><label>Status</label><select name="status">' +
@@ -2584,6 +2677,7 @@ function saveOutreach(id) {
   const rec = existing || { id: uid() };
   Object.assign(rec, {
     venue: v.venue.trim(), kind: v.kind || rec.kind || "venue",
+    festival: (v.festival || "").trim(),
     contactName: v.contactName.trim(), email: v.email.trim(),
     phone: v.phone.trim(), website: v.website.trim(), status: v.status,
     lastContact: v.lastContact, nextFollowUp: v.nextFollowUp, notes: v.notes.trim(),
@@ -3181,6 +3275,8 @@ document.addEventListener("click", (e) => {
     case "refresh-events": closeModal(); refreshEvents(false); break;
 
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
+    case "import-lineup": importLineupDialog(); break;
+    case "save-lineup": saveLineup(); break;
     case "new-outreach": outreachForm(null); break;
     case "edit-outreach": outreachForm((DB.outreach || []).find((x) => x.id === id)); break;
     case "save-outreach": saveOutreach(id || null); break;
