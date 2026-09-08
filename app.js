@@ -1344,7 +1344,11 @@ function showEvent(id) {
     (e.manual ? '<button class="btn btn-sm" data-act="edit-local-event" data-id="' + esc(e.id) + '">Edit</button>' : "") +
     (inPipeline
       ? '<span class="muted" style="font-size:13px">' + esc(e.venue) + " is already in your outreach.</span>"
-      : '<button class="btn" data-act="outreach-from-venue" data-venue="' + esc(e.venue || "") + '">Add venue to outreach</button>') +
+      : '<button class="btn" data-act="outreach-from-venue" data-venue="' + esc(e.venue || "") + '">Add venue</button>') +
+    (acts.length
+      ? '<button class="btn btn-primary" data-act="outreach-lineup" data-id="' + esc(e.id) + '">Add ' +
+        acts.length + " act" + (acts.length === 1 ? "" : "s") + " to outreach</button>"
+      : "") +
     '<div class="spacer"></div><button class="btn btn-primary" data-act="close-modal">Done</button>',
     { noFocus: true });
 }
@@ -2446,6 +2450,7 @@ VIEWS.outreach = function () {
         '" data-act="edit-outreach" data-id="' + r.id + '" style="cursor:pointer">' +
         '<div class="paycard-head" style="border-bottom:0;padding-bottom:0">' +
         '<span class="paycard-who">' + esc(r.venue || "\u2014") + "</span>" +
+        (r.kind === "artist" ? '<span class="pill pill-blue">artist</span>' : "") +
         '<span class="pill ' + outreachPill(r.status) + '">' + esc(outreachLabel(r.status)) + "</span>" +
         "</div>";
       const bits = [];
@@ -2486,15 +2491,66 @@ VIEWS.outreach = function () {
   return html;
 };
 
+// Every act on a bill becomes someone to pitch. Anyone already in the pipeline
+// is left alone rather than duplicated.
+function addLineupToOutreach(ev) {
+  const acts = (ev.artists || []).filter(Boolean);
+  if (!acts.length) return;
+  DB.outreach = DB.outreach || [];
+  const have = new Set(DB.outreach.map((o) => (o.venue || "").trim().toLowerCase()));
+
+  const added = [];
+  const skipped = [];
+  acts.forEach((name) => {
+    const key = name.trim().toLowerCase();
+    if (!key) return;
+    if (have.has(key)) { skipped.push(name); return; }
+    have.add(key);
+    added.push(name);
+    DB.outreach.push({
+      id: uid(),
+      venue: name,
+      kind: "artist",
+      contactName: "", email: "", phone: "", website: "",
+      status: "to-contact",
+      lastContact: "", nextFollowUp: "",
+      notes: "Playing " + ev.name + (ev.venue ? " at " + ev.venue : "") +
+        (ev.date ? " on " + fmtDate(ev.date) : "") + ".",
+    });
+  });
+
+  if (added.length) save();
+  state.view = "outreach";
+  state.outreachFilter = "";
+  render();
+
+  openModal("Lineup added",
+    (added.length
+      ? "<p><strong>" + added.length + " act" + (added.length === 1 ? "" : "s") +
+        "</strong> added to your pipeline, marked <em>to contact</em>.</p>" +
+        '<p class="muted" style="font-size:13px">' + esc(added.join(", ")) + "</p>"
+      : "<p>Everyone on that bill is already in your pipeline.</p>") +
+    (skipped.length
+      ? '<p class="muted" style="font-size:13px;margin-top:10px">Already there: ' +
+        esc(skipped.join(", ")) + "</p>"
+      : ""),
+    '<button class="btn btn-primary" data-act="close-modal">Done</button>', { noFocus: true });
+}
+
 function outreachForm(rec) {
   const r = rec || {
-    id: null, venue: "", contactName: "", email: "", phone: "", website: "",
+    id: null, venue: "", kind: "venue", contactName: "", email: "", phone: "", website: "",
     status: "to-contact", lastContact: "", nextFollowUp: "", notes: "",
   };
   const body =
     '<form id="outreach-form">' +
-    '<div class="field"><label>Venue or promoter</label>' +
+    '<div class="field-row">' +
+    '<div class="field"><label>Name</label>' +
     '<input name="venue" value="' + esc(r.venue) + '" required></div>' +
+    '<div class="field"><label>Who is it</label><select name="kind">' +
+    selectOptions([{ value: "venue", label: "Venue or promoter" },
+                   { value: "artist", label: "Artist" }], r.kind || "venue") +
+    "</select></div></div>" +
     '<div class="field-row">' +
     '<div class="field"><label>Contact person <span class="hint">optional</span></label>' +
     '<input name="contactName" value="' + esc(r.contactName) + '"></div>' +
@@ -2527,7 +2583,8 @@ function saveOutreach(id) {
   const existing = id ? (DB.outreach || []).find((x) => x.id === id) : null;
   const rec = existing || { id: uid() };
   Object.assign(rec, {
-    venue: v.venue.trim(), contactName: v.contactName.trim(), email: v.email.trim(),
+    venue: v.venue.trim(), kind: v.kind || rec.kind || "venue",
+    contactName: v.contactName.trim(), email: v.email.trim(),
     phone: v.phone.trim(), website: v.website.trim(), status: v.status,
     lastContact: v.lastContact, nextFollowUp: v.nextFollowUp, notes: v.notes.trim(),
   });
@@ -3133,6 +3190,13 @@ document.addEventListener("click", (e) => {
         save(); closeModal(); render();
       });
       break;
+    case "outreach-lineup": {
+      const ev = (DB.localEvents || []).find((x) => String(x.id) === String(id));
+      if (!ev) break;
+      closeModal();
+      addLineupToOutreach(ev);
+      break;
+    }
     case "outreach-from-venue": {
       closeModal();
       const venue = el.dataset.venue || "";
