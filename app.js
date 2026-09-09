@@ -4,6 +4,15 @@
    Records live in Firestore, reached from the browser (see cloud.js).
    ============================================================ */
 
+// Whatever version the browser actually loaded — read from the script tag
+// rather than hard-coded, so it always reports the truth.
+const BUILD = (function () {
+  const src = [...document.scripts].map((s) => s.getAttribute("src") || "")
+    .find((s) => s.indexOf("app.js") === 0) || "";
+  const m = src.match(/v=(\d+)/);
+  return m ? m[1] : "unknown";
+})();
+
 let DB = null;
 let state = { view: "today", showDone: false, calMonth: null, period: "year", year: new Date().getFullYear() };
 
@@ -1007,7 +1016,8 @@ VIEWS.today = function () {
   html += '<div class="card card-pad todo-card">' +
     '<div class="todo-add">' +
     '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200">' +
-    '<button class="btn btn-sm" data-act="add-todo">Add</button></div>' +
+    '<button class="btn btn-sm" data-act="add-todo">Add</button>' +
+    '<button class="btn btn-sm" data-act="new-task" title="With a category, due date and notes">\u2699</button></div>' +
     '<div id="todo-list">' + todoListHTML() + "</div></div>";
 
   if (done.length) {
@@ -2971,6 +2981,8 @@ VIEWS.settings = function () {
 
     '<div class="card card-pad">' +
     '<p class="card-title">Your data</p>' +
+    '<p class="muted" style="font-size:12.5px;margin:0 0 12px">Build <strong id="build-stamp">' +
+    esc(BUILD) + "</strong> \u2014 quote this if something looks out of date.</p>" +
     '<p class="muted" style="font-size:13.5px;margin-top:0">Everything lives in <code>data.json</code> inside the ' +
     "<code>income-tracker</code> folder. A dated copy is tucked into <code>backups/</code> the first time you " +
     "change anything each day.</p>" +
