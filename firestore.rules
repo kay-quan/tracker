@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* Signing in only proves you own an email address. THIS file decides what that
+       address may touch.
+
+       The failure this is written against (docs/SECURITY.md in the Life Tracker kit):
+       a rule of `allow read, write: if request.auth != null` looks like a rule and is
+       not one. With anonymous sign-in enabled, every visitor's browser satisfies it
+       just by loading the page.
+
+       The uid comparison below is what actually guards the data: a request may only
+       touch the document named after the signed-in account, so a stranger who signs
+       in gets their own empty document and can never reach this one. */
+    function signedIn() {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // One document per account, named after that account's user id.
+    match /trackers/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+
+      /* Anything filed under that account, on the same terms. This is where the artist
+         contact database lives (trackers/{uid}/ref/artists) — 972 addresses that must
+         NOT sit in the public repo this site is served from. */
+      match /{document=**} {
+        allow read, write: if signedIn() && request.auth.uid == userId;
+      }
+    }
+
+    /* NOT required here, on purpose: `request.auth.token.email_verified == true`.
+
+       It matters in the kit because that project grants access by an ALLOWLIST of
+       addresses — so an unverified registration of a teammate's address would inherit
+       that teammate's access. This project grants access by uid instead. An attacker
+       registering any address, verified or not, lands on their own uid and their own
+       empty document, so the check buys nothing here.
+
+       It would, however, lock the owner out instantly if their address was never
+       verified. Do not add it without confirming verification status first. */
+
+    // Everything else stays closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

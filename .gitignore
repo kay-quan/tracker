@@ -1,0 +1,18 @@
+# Your records live in Firestore now. This old local copy has personal details
+# in it and must never be published.
+data.json
+data.json.tmp
+backups/
+
+# The artist contact database: 972 booking and management addresses, given to Kevin
+# privately by Jay. This repo is PUBLIC and serves GitHub Pages, so anything committed
+# here is published to the open internet and stays in git history forever.
+# It is delivered to the app through Firestore instead, behind the uid rule.
+public/artists.js
+artists.payload.json
+
+# Local cruft
+__pycache__/
+*.bak
+*.pyc
+.DS_Store
