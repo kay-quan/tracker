@@ -2477,196 +2477,207 @@ VIEWS.outreach = function () {
       (due.length > 2 ? " and " + (due.length - 2) + " more" : "") + ".</div></div>";
   }
 
-  const filters = [
-    { key: "", label: "Everything", n: rows.length },
-    { key: "to-contact", label: "To contact", n: count("to-contact") },
-    { key: "contacted", label: "Waiting", n: count("contacted") + count("follow-up") },
-    { key: "replied", label: "Replied", n: count("replied") },
-    { key: "booked", label: "Booked", n: count("booked") },
-  ];
-  html += '<div class="chips">' + filters.map((f) =>
-    '<button class="chip' + ((state.outreachFilter || "") === f.key ? " active" : "") +
-    '" data-act="outreach-filter" data-key="' + f.key + '">' + esc(f.label) +
-    '<span class="n">' + f.n + "</span></button>").join("") + "</div>";
-
+  /* ---- mode switch ---- */
+  const mode = state.outreachMode || "lineups";
+  const tog = (m, label) => '<button class="seg' + (mode === m ? " active" : "") +
+    '" data-act="outreach-mode" data-mode="' + m + '">' + label + "</button>";
   html += '<div class="btn-row">' +
-    '<button class="btn btn-primary" data-act="new-outreach">Add venue</button>' +
-    '<button class="btn" data-act="import-lineup">Add a lineup</button>' +
-    '<button class="btn" data-act="refresh-events">Refresh local shows</button>' +
-    '<button class="btn" data-act="goto" data-view="clients">Clients</button></div>';
+    '<div class="segmented">' + tog("lineups", "\u25a6 Lineups") + tog("list", "\u2630 List") + "</div>" +
+    '<button class="btn" data-act="goto" data-view="settings">\u2709 Template</button>' +
+    '<button class="btn" data-act="import-lineup">\uff0b Add a lineup</button>' +
+    '<button class="btn btn-primary" data-act="new-outreach">\uff0b Add</button></div>';
 
-  /* ---- pipeline ---- */
-  const active = state.outreachFilter
-    ? rows.filter((r) => state.outreachFilter === "contacted"
-        ? ["contacted", "follow-up"].includes(r.status)
-        : r.status === state.outreachFilter)
-    : rows;
-
-  html += '<h2 class="section-head">Pipeline' +
-    (active.length ? ' <span class="count">' + active.length + "</span>" : "") + "</h2>";
-
-  if (!rows.length) {
-    html += '<div class="card empty"><h3>Nobody in the pipeline yet</h3>' +
-      "<p>Add a venue by hand, or pull local shows and pick from the venues already " +
-      "booking acts near you.</p>" +
-      '<button class="btn btn-primary" data-act="new-outreach">Add a venue</button></div>';
-  } else if (!active.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
-      "Nothing at this stage.</p></div>";
-  } else {
-    const order = OUTREACH_STATUSES.map((x) => x.value);
-    // Numeric-aware compare so an act like "999999999" sorts sensibly.
-    const byName = (a, b) => (a.venue || "").localeCompare(b.venue || "",
-      undefined, { numeric: true, sensitivity: "base" });
-
-    // Anyone tied to a festival is grouped under it, alphabetically. Everyone
-    // else keeps the old status ordering underneath.
-    const groups = new Map();
-    const loose = [];
-    active.forEach((r) => {
-      if (r.festival) {
-        if (!groups.has(r.festival)) groups.set(r.festival, []);
-        groups.get(r.festival).push(r);
-      } else loose.push(r);
-    });
-
-    Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
-      const list = groups.get(fest).sort(byName);
-      const toContact = list.filter((r) => r.status === "to-contact").length;
-      html += '<h3 class="fest-head">' + esc(fest) +
-        ' <span class="count">' + list.length + " act" + (list.length === 1 ? "" : "s") +
-        (toContact ? " \u00b7 " + toContact + " to contact" : "") + "</span></h3>";
-      list.forEach((r) => { html += outreachCard(r, today); });
-    });
-
-    loose.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || byName(a, b));
-    if (loose.length && groups.size) html += '<h3 class="fest-head">Everyone else</h3>';
-    loose.forEach((r) => { html += outreachCard(r, today); });
-  }
-
-  /* ---- venues from the local shows feed ---- */
-  const suggestions = venueSuggestions();
-  html += '<h2 class="section-head">Venues booking near you</h2>';
-  if (!(DB.localEvents || []).length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0 0 12px;font-size:14px">' +
-      "Pull the local shows feed and every venue putting on events nearby shows up here.</p>" +
-      '<button class="btn btn-sm" data-act="goto" data-view="calendar">See Local Events</button></div>';
-  } else if (!suggestions.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
-      "Every venue in the feed is already in your pipeline.</p></div>";
-  } else {
-    suggestions.slice(0, 12).forEach((v) => {
-      html += '<div class="listrow"><span><strong>' + esc(v.venue) + "</strong><br>" +
-        '<span class="muted" style="font-size:12.5px">' + v.shows + " show" + (v.shows === 1 ? "" : "s") +
-        " \u00b7 next " + esc(fmtDate(v.next, { month: "short", day: "numeric" })) + "</span></span>" +
-        '<button class="btn btn-sm" data-act="outreach-from-venue" data-venue="' + esc(v.venue) + '">Add</button></div>';
-    });
-  }
-
+  html += mode === "list" ? outreachList(rows, today) : outreachLineups(rows);
   return html;
 };
 
-// Every act on a bill becomes someone to pitch. Anyone already in the pipeline
-// is left alone rather than duplicated.
-function addLineupToOutreach(ev) {
-  const acts = (ev.artists || []).filter(Boolean);
-  if (!acts.length) return;
-  DB.outreach = DB.outreach || [];
-  const have = new Set(DB.outreach.map((o) => (o.venue || "").trim().toLowerCase()));
+/* ---------- lineups: a card per festival, artists as pickable buttons ---------- */
 
-  const added = [];
-  const skipped = [];
-  acts.forEach((name) => {
-    const key = name.trim().toLowerCase();
-    if (!key) return;
-    if (have.has(key)) { skipped.push(name); return; }
-    have.add(key);
-    added.push(name);
-    DB.outreach.push({
-      id: uid(),
-      venue: name,
-      kind: "artist",
-      contactName: "", email: "", phone: "", website: "",
-      status: "to-contact",
-      lastContact: "", nextFollowUp: "",
-      notes: "Playing " + ev.name + (ev.venue ? " at " + ev.venue : "") +
-        (ev.date ? " on " + fmtDate(ev.date) : "") + ".",
-    });
+function outreachLineups(rows) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    if (!r.festival) return;
+    if (!groups.has(r.festival)) groups.set(r.festival, []);
+    groups.get(r.festival).push(r);
   });
 
-  if (added.length) save();
-  state.view = "outreach";
-  state.outreachFilter = "";
-  render();
+  if (!groups.size) {
+    return '<div class="card empty"><h3>No lineups yet</h3>' +
+      "<p>Add a lineup and every act becomes a button you can pick and email as a batch.</p>" +
+      '<button class="btn btn-primary" data-act="import-lineup">Add a lineup</button></div>';
+  }
 
-  openModal("Lineup added",
-    (added.length
-      ? "<p><strong>" + added.length + " act" + (added.length === 1 ? "" : "s") +
-        "</strong> added to your pipeline, marked <em>to contact</em>.</p>" +
-        '<p class="muted" style="font-size:13px">' + esc(added.join(", ")) + "</p>"
-      : "<p>Everyone on that bill is already in your pipeline.</p>") +
-    (skipped.length
-      ? '<p class="muted" style="font-size:13px;margin-top:10px">Already there: ' +
-        esc(skipped.join(", ")) + "</p>"
-      : ""),
-    '<button class="btn btn-primary" data-act="close-modal">Done</button>', { noFocus: true });
-}
+  const sel = state.picked || {};
+  let html = "";
 
-// Bulk-add a bill: paste the names, tag them all with the festival.
-function importLineupDialog() {
-  const known = Array.from(new Set((DB.outreach || []).map((o) => o.festival).filter(Boolean)));
-  openModal("Add a lineup",
-    '<form id="lineup-form">' +
-    '<div class="field"><label>Festival or event</label>' +
-    '<input name="festival" placeholder="Escape Psycho Circus 2026" list="fest-known" required>' +
-    '<datalist id="fest-known">' + known.map((f) => '<option value="' + esc(f) + '">').join("") +
-    "</datalist></div>" +
-    '<div class="field"><label>Acts <span class="hint">one per line, or separated by commas</span></label>' +
-    '<textarea name="names" rows="12" placeholder="A Little Sound&#10;Adam Ten&#10;All The Reason"></textarea></div>' +
-    '<p class="muted" style="font-size:13px;margin:0">Anyone already in your pipeline is left alone. ' +
-    "Every new act is added as <em>to contact</em>.</p></form>",
-    '<button class="btn" data-act="close-modal">Cancel</button>' +
-    '<button class="btn btn-primary" data-act="save-lineup">Add them</button>', { wide: true });
-}
+  Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
+    const list = groups.get(fest).sort((a, b) =>
+      (a.venue || "").localeCompare(b.venue || "", undefined, { numeric: true, sensitivity: "base" }));
 
-function saveLineup() {
-  const v = formValues($("#lineup-form"));
-  const festival = (v.festival || "").trim();
-  if (!festival) { alert("Give the festival a name."); return; }
+    const withEmail = list.filter((r) => r.email);
+    const noEmail = list.filter((r) => !r.email);
+    const contacted = list.filter((r) => r.status !== "to-contact");
+    const filter = (state.lineupFilter || {})[fest] || "all";
+    const shown = filter === "email" ? withEmail
+      : filter === "noemail" ? noEmail
+      : filter === "contacted" ? contacted
+      : list;
+    const pickedHere = list.filter((r) => sel[r.id]);
 
-  // Split on newlines or commas, drop blanks and stray bullets.
-  const names = (v.names || "")
-    .split(/[\n,]+/)
-    .map((n) => n.replace(/^[\s•\-\u2022]+/, "").trim())
-    .filter(Boolean);
-  if (!names.length) { alert("Paste the acts first."); return; }
+    html += '<div class="lineup">';
 
-  DB.outreach = DB.outreach || [];
-  const have = new Set(DB.outreach.map((o) => (o.venue || "").trim().toLowerCase()));
-  const added = [], skipped = [];
-  names.forEach((name) => {
-    const key = name.toLowerCase();
-    if (have.has(key)) { skipped.push(name); return; }
-    have.add(key);
-    added.push(name);
-    DB.outreach.push({
-      id: uid(), venue: name, kind: "artist", festival: festival,
-      contactName: "", email: "", phone: "", website: "",
-      status: "to-contact", lastContact: "", nextFollowUp: "",
-      notes: "Playing " + festival + ".",
-    });
+    // header
+    html += '<div class="lineup-head">' +
+      '<span class="lineup-name">' + esc(fest) + "</span>" +
+      '<span class="lineup-meta">' + list.length + " act" + (list.length === 1 ? "" : "s") +
+      " \u00b7 " + withEmail.length + " reachable</span>" +
+      (pickedHere.length
+        ? '<button class="btn btn-sm btn-primary" data-act="email-picked" data-fest="' + esc(fest) +
+          '">\u2709 Email ' + pickedHere.length + " selected</button>"
+        : '<button class="btn btn-sm" data-act="pick-all" data-fest="' + esc(fest) +
+          '">Select all reachable</button>') +
+      "</div>";
+
+    // filters
+    const fb = (key, label, n) => '<button class="fbtn' + (filter === key ? " on" : "") +
+      '" data-act="lineup-filter" data-fest="' + esc(fest) + '" data-key="' + key + '">' +
+      label + " <b>" + n + "</b></button>";
+    html += '<div class="fbar">' +
+      fb("all", "All", list.length) +
+      fb("email", "\u2709 Has email", withEmail.length) +
+      fb("noemail", "No email", noEmail.length) +
+      fb("contacted", "Contacted", contacted.length) +
+      "</div>";
+
+    html += '<div class="legend legend-sm">' +
+      '<span><i class="dot dot-new"></i>not contacted</span>' +
+      '<span><i class="dot dot-sent"></i>emailed</span>' +
+      '<span><i class="dot dot-pick"></i>selected</span></div>';
+
+    // the acts themselves
+    if (!shown.length) {
+      html += '<p class="muted" style="font-size:13px;margin:10px 0 0">Nothing matches that filter.</p>';
+    } else {
+      html += '<div class="pickgrid">' + shown.map((r) => {
+        const cls = sel[r.id] ? "picked" : r.status !== "to-contact" ? "sent" : "";
+        const sub = r.email ? esc(r.email) : "no email on file yet";
+        return '<button class="pick-act ' + cls + '" data-act="pick-act" data-id="' + r.id + '">' +
+          '<span class="pick-name">' + esc(r.venue) + "</span>" +
+          '<span class="pick-sub">' + sub + "</span></button>";
+      }).join("") + "</div>";
+    }
+    html += "</div>";
   });
 
-  if (added.length) save();
-  closeModal();
-  state.view = "outreach"; state.outreachFilter = "";
+  // anyone not tied to a lineup
+  const loose = rows.filter((r) => !r.festival);
+  if (loose.length) {
+    html += '<details class="allleads"><summary>Everyone else in the pipeline \u2014 ' +
+      loose.length + "</summary>" + outreachList(loose, todayISO()) + "</details>";
+  }
+  return html;
+}
+
+/* ---------- the flat pipeline ---------- */
+
+function outreachList(rows, today) {
+  if (!rows.length) {
+    return '<div class="card empty"><h3>Nobody in the pipeline yet</h3>' +
+      "<p>Add a venue by hand, or bring in a whole lineup.</p>" +
+      '<button class="btn btn-primary" data-act="new-outreach">Add a venue</button></div>';
+  }
+  const order = OUTREACH_STATUSES.map((x) => x.value);
+  const byName = (a, b) => (a.venue || "").localeCompare(b.venue || "",
+    undefined, { numeric: true, sensitivity: "base" });
+
+  const groups = new Map();
+  const loose = [];
+  rows.forEach((r) => {
+    if (r.festival) {
+      if (!groups.has(r.festival)) groups.set(r.festival, []);
+      groups.get(r.festival).push(r);
+    } else loose.push(r);
+  });
+
+  let html = "";
+  Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
+    const list = groups.get(fest).sort(byName);
+    const toContact = list.filter((r) => r.status === "to-contact").length;
+    html += '<h3 class="fest-head">' + esc(fest) +
+      ' <span class="count">' + list.length + " act" + (list.length === 1 ? "" : "s") +
+      (toContact ? " \u00b7 " + toContact + " to contact" : "") + "</span></h3>";
+    list.forEach((r) => { html += outreachCard(r, today); });
+  });
+  loose.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || byName(a, b));
+  if (loose.length && groups.size) html += '<h3 class="fest-head">Everyone else</h3>';
+  loose.forEach((r) => { html += outreachCard(r, today); });
+  return html;
+}
+
+// Picking acts to email as a batch. Selection is a transient UI state — it
+// isn't saved, so a reload starts you fresh rather than resurrecting a
+// half-finished pick from days ago.
+function togglePick(id) {
+  state.picked = state.picked || {};
+  if (state.picked[id]) delete state.picked[id]; else state.picked[id] = true;
   render();
-  openModal("Lineup added",
-    "<p><strong>" + added.length + " act" + (added.length === 1 ? "" : "s") +
-    "</strong> added under <strong>" + esc(festival) + "</strong>, sorted alphabetically.</p>" +
-    (skipped.length
-      ? '<p class="muted" style="font-size:13px">Already in your pipeline, left as they were: ' +
-        esc(skipped.join(", ")) + "</p>"
+}
+
+function pickAllReachable(fest) {
+  state.picked = state.picked || {};
+  (DB.outreach || []).forEach((r) => {
+    if (r.festival === fest && r.email) state.picked[r.id] = true;
+  });
+  render();
+}
+
+// Opens one Gmail draft addressed to everyone picked. Addresses go in BCC so
+// the acts can't see each other's contact details.
+function emailPicked(fest) {
+  const sel = state.picked || {};
+  const chosen = (DB.outreach || []).filter((r) => sel[r.id] && r.festival === fest);
+  const reachable = chosen.filter((r) => r.email);
+  const missing = chosen.filter((r) => !r.email);
+
+  if (!reachable.length) {
+    openModal("No addresses yet",
+      "<p>None of the acts you picked have an email on file, so there's nobody to write to.</p>" +
+      '<p class="muted" style="font-size:13px">Tap an act to open it and add an address, ' +
+      "then pick it again.</p>",
+      '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+    return;
+  }
+
+  const s = DB.settings;
+  const subject = (s.emailSubject || "").replace(/\{invoice\}/g, fest).replace(/\{me\}/g,
+    s.yourName || s.businessName || "") || fest;
+  const body = "Hi,\n\nI shoot photo and video at shows around " +
+    (s.eventCity || "LA") + ", and I'll be at " + fest + ".\n\n" +
+    "If you'd like coverage of your set, I'd love to talk.\n\nThanks,\n" +
+    (s.yourName || s.businessName || "");
+
+  const url = "https://mail.google.com/mail/?view=cm&fs=1" +
+    "&bcc=" + encodeURIComponent(reachable.map((r) => r.email).join(",")) +
+    "&su=" + encodeURIComponent(subject) +
+    "&body=" + encodeURIComponent(body);
+  window.open(url, "_blank", "noopener");
+
+  // Reaching out counts as contact, so move them along the pipeline.
+  reachable.forEach((r) => {
+    if (r.status === "to-contact") { r.status = "contacted"; r.lastContact = todayISO(); }
+  });
+  state.picked = {};
+  save();
+  render();
+
+  openModal("Draft opened",
+    "<p>A Gmail draft is open, addressed to <strong>" + reachable.length + " act" +
+    (reachable.length === 1 ? "" : "s") + "</strong> in BCC, so nobody sees anyone else's address.</p>" +
+    "<p>They've been moved to <em>contacted</em>.</p>" +
+    (missing.length
+      ? '<p class="muted" style="font-size:13px">' + missing.length +
+        " picked act" + (missing.length === 1 ? "" : "s") + " had no address and " +
+        (missing.length === 1 ? "was" : "were") + " left out.</p>"
       : ""),
     '<button class="btn btn-primary" data-act="close-modal">Done</button>', { noFocus: true });
 }
@@ -3357,6 +3368,16 @@ document.addEventListener("click", (e) => {
     case "refresh-events": closeModal(); refreshEvents(false); break;
 
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
+    case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
+    case "lineup-filter": {
+      state.lineupFilter = state.lineupFilter || {};
+      state.lineupFilter[el.dataset.fest] = el.dataset.key;
+      render();
+      break;
+    }
+    case "pick-act": togglePick(id); break;
+    case "pick-all": pickAllReachable(el.dataset.fest); break;
+    case "email-picked": emailPicked(el.dataset.fest); break;
     case "import-lineup": importLineupDialog(); break;
     case "save-lineup": saveLineup(); break;
     case "new-outreach": outreachForm(null); break;
