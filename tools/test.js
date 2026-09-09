@@ -4,20 +4,31 @@ const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 
-const PUB = path.join(__dirname, "..", "public");
+// The app is served from the repo root, matching GitHub Pages exactly.
+const PUB = path.join(__dirname, "..");
 const read = (f) => fs.readFileSync(path.join(PUB, f), "utf8");
 
 let pass = 0, fail = 0;
 const failures = [];
+const pending = [];
+/* Async tests must be awaited or a rejected promise counts as a pass -- exactly the
+   kind of silently-green suite that lets a data-loss bug ship. */
 function t(name, fn) {
+  const record = (e) => { fail++; failures.push(name + "\n      " + e.message); };
+  let r;
   try {
-    const r = fn();
-    if (r === false) throw new Error("returned false");
-    pass++;
+    r = fn();
   } catch (e) {
-    fail++;
-    failures.push(name + "\n      " + e.message);
+    record(e);
+    return;
   }
+  if (r && typeof r.then === "function") {
+    pending.push(r.then((v) => {
+      if (v === false) record(new Error("returned false")); else pass++;
+    }, record));
+    return;
+  }
+  if (r === false) record(new Error("returned false")); else pass++;
 }
 const eq = (a, b, what) => {
   if (a !== b) throw new Error((what || "") + " expected " + JSON.stringify(b) + ", got " + JSON.stringify(a));
@@ -34,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=38" }],
+  scripts: [{ getAttribute: () => "app.js?v=39" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -64,8 +75,19 @@ sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
-// artists.js assigns onto window.
-vm.runInContext(read("artists.js"), sandbox, { filename: "artists.js" });
+/* The app loads the database from Firestore at runtime. Tests load the very same
+   payload the import writes, so what is tested is what ships -- no second format. */
+const payloadPath = path.join(__dirname, "..", "artists.payload.json");
+if (!fs.existsSync(payloadPath)) {
+  console.error("\nMissing " + payloadPath +
+    "\nGenerate it first:  python3 tools/gen_artists_js.py --apply\n");
+  process.exit(2);
+}
+const payload = JSON.parse(fs.readFileSync(payloadPath, "utf8"));
+sandbox.ARTIST_ACTS = payload.acts;
+sandbox.ARTIST_LOOKUP = payload.lookup;
+sandbox.ARTIST_FESTIVALS = payload.festivals;
+sandbox.ARTIST_STATS = payload.stats;
 
 // Strip the three bootstrap lines so loading doesn't kick off a sign-in.
 let app = read("app.js").replace(
@@ -392,9 +414,202 @@ t("drafting again skips acts already contacted", () => {
   eq(db.outreach.filter((r) => r.status === "contacted").length, already, "all still contacted");
 });
 
+/* ================= sync: one document per record =================
+   Run against the real cloud.js in its own sandbox, with fetch faked as an in-memory
+   Firestore. These are the tests that matter most: a bug here loses real data. */
+
+function makeCloud() {
+  const store = new Map();               // full doc path -> json string
+  const calls = { commits: 0, writes: 0, gets: 0, lists: 0 };
+
+  const box = {
+    console, JSON, Date, Math, setTimeout, clearTimeout,
+    localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
+    navigator: { platform: "test" },
+    async fetch(url, opts) {
+      opts = opts || {};
+      const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+      if (url.indexOf(":commit") >= 0) {
+        calls.commits++;
+        const w = JSON.parse(opts.body).writes;
+        calls.writes += w.length;
+        w.forEach((x) => {
+          if (x.delete) store.delete(x.delete.split("/documents/")[1]);
+          else store.set(x.update.name.split("/documents/")[1],
+                         x.update.fields.json.stringValue);
+        });
+        return ok({});
+      }
+      const path = url.split("/documents/")[1].split("?")[0];
+      if (opts.method === "PATCH") {                       // saveRef
+        store.set(path, JSON.parse(opts.body).fields.json.stringValue);
+        return ok({});
+      }
+      // a listing if anything is filed beneath this path, otherwise a get
+      const kids = [...store.keys()].filter((k) => k.startsWith(path + "/"));
+      if (path.endsWith("/rec")) {
+        calls.lists++;
+        return ok({ documents: kids.map((k) => ({
+          name: "projects/p/databases/(default)/documents/" + k,
+          fields: { json: { stringValue: store.get(k) } } })) });
+      }
+      calls.gets++;
+      if (!store.has(path)) return { ok: false, status: 404, json: async () => ({}) };
+      return ok({ fields: { json: { stringValue: store.get(path) } } });
+    },
+  };
+  box.window = box;
+  vm.createContext(box);
+  vm.runInContext(read("cloud.js") + "\nglobalThis.__C = Cloud;", box, { filename: "cloud.js" });
+  const C = box.__C;
+  C.session = { idToken: "t", refreshToken: "r", expiresAt: Date.now() + 3.6e6, uid: "U1" };
+  return { C, store, calls };
+}
+
+const sampleData = () => ({
+  settings: { yourName: "Kevin Quan", incomeGoal: 50000 },
+  gigs: [{ id: "g1", client: "A" }, { id: "g2", client: "B" }],
+  invoices: [{ id: "i1", number: "INV-1" }],
+  clients: [{ id: "c1", name: "A" }],
+  outreach: [{ id: "o1", venue: "Act", status: "to-contact" }],
+  todos: [{ id: "t1", text: "thing" }],
+  income: [], expenses: [],
+  localEvents: [{ id: "e1" }, { id: "e2" }, { id: "e3" }],
+  localEventsFetchedAt: 123,
+});
+
+t("migration moves a single-blob tracker into per-record documents", async () => {
+  const { C, store } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));   // legacy blob
+  const got = await C.load();
+  eq(got.gigs.length, 2, "gigs");
+  eq(got.invoices.length, 1, "invoices");
+  eq(got.localEvents.length, 3, "localEvents");
+  eq(got.settings.yourName, "Kevin Quan", "settings");
+  if (!store.has("trackers/U1/rec/g.g1")) throw new Error("gig not written as its own doc");
+  if (!store.has("trackers/U1/ref/events")) throw new Error("events doc not written");
+  if (!store.has("trackers/U1/ref/meta")) throw new Error("meta doc not written");
+});
+
+t("migration leaves the old blob untouched as a rollback", async () => {
+  const { C, store } = makeCloud();
+  const blob = JSON.stringify(sampleData());
+  store.set("trackers/U1", blob);
+  await C.load();
+  eq(store.get("trackers/U1"), blob, "legacy document must not be altered");
+});
+
+t("a migrated tracker reads back identically", async () => {
+  const { C, store } = makeCloud();
+  const original = sampleData();
+  store.set("trackers/U1", JSON.stringify(original));
+  await C.load();
+  const fresh = makeCloud();
+  fresh.store.clear();
+  store.forEach((v, k) => fresh.store.set(k, v));
+  const got = await fresh.C.load();
+  ["gigs", "invoices", "clients", "outreach", "todos", "localEvents"].forEach((k) => {
+    eq(JSON.stringify((got[k] || []).slice().sort((a, b) => a.id < b.id ? -1 : 1)),
+       JSON.stringify((original[k] || []).slice().sort((a, b) => a.id < b.id ? -1 : 1)), k);
+  });
+  eq(JSON.stringify(got.settings), JSON.stringify(original.settings), "settings");
+  eq(got.localEventsFetchedAt, 123, "scalar");
+});
+
+t("saving an unchanged tracker writes nothing at all", async () => {
+  const { C, store, calls } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));
+  const data = await C.load();
+  const before = calls.writes;
+  await C.save(data);
+  eq(calls.writes, before, "an unchanged save must not write");
+});
+
+t("editing one record writes only that record", async () => {
+  const { C, store, calls } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));
+  const data = await C.load();
+  const before = calls.writes;
+  data.gigs.find((g) => g.id === "g2").client = "B changed";
+  await C.save(data);
+  eq(calls.writes - before, 1, "exactly one document should change");
+  eq(JSON.parse(store.get("trackers/U1/rec/g.g2")).client, "B changed", "stored value");
+});
+
+t("deleting a record deletes its document", async () => {
+  const { C, store } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));
+  const data = await C.load();
+  data.gigs = data.gigs.filter((g) => g.id !== "g1");
+  await C.save(data);
+  if (store.has("trackers/U1/rec/g.g1")) throw new Error("deleted gig still stored");
+  if (!store.has("trackers/U1/rec/g.g2")) throw new Error("wrong gig deleted");
+});
+
+t("THE CLOBBER TEST: a stale device no longer overwrites another's edits", async () => {
+  // Both devices load the same tracker. Each edits a DIFFERENT record. Under the old
+  // whole-blob model the second save destroyed the first; both must now survive.
+  const { C, store } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));
+  await C.load();
+
+  const laptop = makeCloud(); laptop.store.clear(); store.forEach((v, k) => laptop.store.set(k, v));
+  const phone  = makeCloud(); phone.store.clear();  store.forEach((v, k) => phone.store.set(k, v));
+  const lData = await laptop.C.load();
+  const pData = await phone.C.load();
+
+  lData.invoices.find((i) => i.id === "i1").number = "INV-EDITED-ON-LAPTOP";
+  await laptop.C.save(lData);
+  // phone's copy is now stale, and saves a change to a different record
+  laptop.store.forEach((v, k) => phone.store.set(k, v));
+  pData.todos.find((x) => x.id === "t1").text = "EDITED-ON-PHONE";
+  await phone.C.save(pData);
+
+  const after = makeCloud(); after.store.clear();
+  phone.store.forEach((v, k) => after.store.set(k, v));
+  const final = await after.C.load();
+  eq(final.invoices[0].number, "INV-EDITED-ON-LAPTOP", "laptop's edit must survive");
+  eq(final.todos.find((x) => x.id === "t1").text, "EDITED-ON-PHONE", "phone's edit must survive");
+});
+
+t("signing out clears the diff baseline", () => {
+  const { C } = makeCloud();
+  C.lastPush = { "ref/meta": "{}" };
+  C.signOut();
+  eq(C.lastPush, null, "a stale baseline would let the next account be overwritten");
+});
+
+t("local events stay one document, not 462", async () => {
+  const { C, store } = makeCloud();
+  const d = sampleData();
+  d.localEvents = Array.from({ length: 462 }, (_, i) => ({ id: "e" + i }));
+  store.set("trackers/U1", JSON.stringify(d));
+  const got = await C.load();
+  eq(got.localEvents.length, 462, "round trip");
+  eq([...store.keys()].filter((k) => k.startsWith("trackers/U1/rec/")).length, 6,
+     "only real records get their own document");
+});
+
+t("the artist database is never touched by a save", async () => {
+  const { C, store } = makeCloud();
+  store.set("trackers/U1", JSON.stringify(sampleData()));
+  store.set("trackers/U1/ref/artists", JSON.stringify({ acts: { x: 1 } }));
+  const data = await C.load();
+  data.gigs[0].client = "changed";
+  await C.save(data);
+  if (!store.has("trackers/U1/ref/artists")) throw new Error("artist database was deleted");
+});
+
+t("a first run with no data anywhere returns null", async () => {
+  const { C } = makeCloud();
+  eq(await C.load(), null);
+});
+
 /* ---------- report ---------- */
-console.log("");
-failures.forEach((f) => console.log("  FAIL  " + f));
-console.log("");
-console.log((fail ? "FAILED" : "PASSED") + " — " + pass + " passed, " + fail + " failed");
-process.exit(fail ? 1 : 0);
+Promise.all(pending).then(() => {
+  console.log("");
+  failures.forEach((f) => console.log("  FAIL  " + f));
+  console.log("");
+  console.log((fail ? "FAILED" : "PASSED") + " — " + pass + " passed, " + fail + " failed");
+  process.exit(fail ? 1 : 0);
+});
