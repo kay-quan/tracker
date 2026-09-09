@@ -1674,6 +1674,9 @@ main > .section-head:first-child { margin-top: 4px; }
 }
 .pick-act.sent { border-left: 3px solid var(--money-in); }
 .pick-act.sent .pick-name { color: var(--ink-2); }
+/* Drafted but not yet sent — a real, distinct state. Amber, not the green of contacted. */
+.pick-act.drafted { border-left: 3px solid var(--warn, #d79a3a); }
+.dot-draft { background: var(--warn, #d79a3a); }
 .pick-act.picked {
   background: var(--accent);
   border-color: var(--accent);

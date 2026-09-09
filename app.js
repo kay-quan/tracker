@@ -420,16 +420,51 @@ function renderTabbar() {
   }).join("");
 }
 
+/* Set only while the user is deliberately changing tabs, where jumping to the top IS
+   the right thing. Every other render is a redraw underneath them. */
+let switchingTab = false;
+
+/* Rebuilding the whole view as a string is what keeps this app simple, but the browser
+   was holding two things for us that the rebuild threw away: how far down the page we
+   were, and which <details> groups were open. Ticking one act in a 208-act lineup
+   scrolled back to the top and collapsed everything. Groups are keyed by their summary
+   text because the markup is regenerated and element identity does not survive. */
+function openGroupKeys() {
+  return $$("#view details[open]").map((d) => {
+    const s = d.querySelector("summary");
+    return s ? s.textContent.trim() : "";
+  }).filter(Boolean);
+}
+
 function render() {
+  const y = window.scrollY;
+  const wasOpen = switchingTab ? [] : openGroupKeys();
+
   document.body.dataset.view = state.view;   // lets CSS widen only where needed
   renderHeader();
   renderTabbar();
   $("#view").innerHTML = VIEWS[state.view]();
-  window.scrollTo({ top: 0 });
+
+  if (switchingTab) {
+    window.scrollTo({ top: 0 });
+  } else {
+    if (wasOpen.length) {
+      $$("#view details").forEach((d) => {
+        const s = d.querySelector("summary");
+        if (s && wasOpen.indexOf(s.textContent.trim()) >= 0) d.open = true;
+      });
+    }
+    window.scrollTo({ top: y });
+  }
   if (VIEWS[state.view].after) VIEWS[state.view].after();
 }
 
-function go(view) { state.view = view; render(); }
+function go(view) {
+  switchingTab = true;
+  state.view = view;
+  render();
+  switchingTab = false;
+}
 
 function setupComplete() {
   const s = DB.settings;
@@ -2487,6 +2522,16 @@ VIEWS.outreach = function () {
       (due.length > 2 ? " and " + (due.length - 2) + " more" : "") + ".</div></div>";
   }
 
+  // Said once, here, rather than repeated on every lineup card.
+  const st = window.ARTIST_STATS;
+  if (st) {
+    html += '<p class="muted" style="font-size:12.5px;margin:0 0 12px">' +
+      "<strong>" + st.acts + "</strong> acts across <strong>" + st.festivals +
+      "</strong> lineups \u00b7 <strong>" + st.reachable + "</strong> with an address on file (" +
+      st.addresses + " total). Every address carries the page it was read from." +
+      "</p>";
+  }
+
   /* ---- mode switch ---- */
   const mode = state.outreachMode || "lineups";
   const tog = (m, label) => '<button class="seg' + (mode === m ? " active" : "") +
@@ -2501,14 +2546,205 @@ VIEWS.outreach = function () {
   return html;
 };
 
+/* ---------- getting the database into the app ----------
+   It is NOT a file next to the page: this site is served from a public GitHub repo, so
+   a static artists.js would publish 972 booking addresses to the open internet and into
+   git history permanently. It is stored per-account in Firestore instead, and cached
+   locally so a phone doesn't refetch 290 KB on every load. */
+
+const ARTIST_CACHE = "tracker.artists.v1";
+
+function applyArtistDB(p) {
+  if (!p || !p.acts) return false;
+  window.ARTIST_ACTS = p.acts;
+  window.ARTIST_LOOKUP = p.lookup || {};
+  window.ARTIST_FESTIVALS = p.festivals || {};
+  window.ARTIST_STATS = p.stats || null;
+  return true;
+}
+
+async function loadArtistDB() {
+  // Cache first so the tab is usable immediately; the network copy corrects it after.
+  try {
+    const c = localStorage.getItem(ARTIST_CACHE);
+    if (c) applyArtistDB(JSON.parse(c));
+  } catch (e) { /* private window, cleared storage: just fetch it */ }
+
+  try {
+    const got = await Cloud.loadRef("artists");
+    if (got && applyArtistDB(got.data)) {
+      try { localStorage.setItem(ARTIST_CACHE, JSON.stringify(got.data)); } catch (e) {}
+      if (state.view === "outreach") render();
+    }
+  } catch (e) {
+    console.warn("Artist database not loaded:", e.message);
+  }
+}
+
+// One-time import from the file tools/gen_artists_js.py writes.
+function importArtistDB() {
+  // Reuse one input kept in the DOM rather than a fresh detached one each time: a
+  // detached input can only ever be driven by the native picker.
+  let inp = $("#artist-import-file");
+  if (!inp) {
+    inp = document.createElement("input");
+    inp.type = "file";
+    inp.id = "artist-import-file";
+    inp.accept = ".json,application/json";
+    inp.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0";
+    document.body.appendChild(inp);
+  }
+  inp.value = "";
+  inp.onchange = null;
+  inp.addEventListener("change", async function handler() {
+    inp.removeEventListener("change", handler);
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    let payload;
+    try {
+      payload = JSON.parse(await f.text());
+    } catch (e) {
+      openModal("Couldn't read that file", "<p>That isn't valid JSON.</p>",
+        '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+      return;
+    }
+    if (!payload.acts || !payload.festivals) {
+      openModal("Wrong file",
+        "<p>That JSON doesn't look like the artist database — expected <code>acts</code> " +
+        "and <code>festivals</code>.</p><p class=\"muted\" style=\"font-size:13px\">" +
+        "Generate it with <code>python3 tools/gen_artists_js.py --apply</code>.</p>",
+        '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+      return;
+    }
+    openModal("Importing…", "<p>Uploading the database to your account.</p>", "");
+    try {
+      await Cloud.saveRef("artists", payload);
+      applyArtistDB(payload);
+      try { localStorage.setItem(ARTIST_CACHE, JSON.stringify(payload)); } catch (e) {}
+      closeModal();
+      render();
+      const s = payload.stats || {};
+      openModal("Database imported",
+        "<p><strong>" + (s.acts || 0) + "</strong> acts across <strong>" +
+        (s.festivals || 0) + "</strong> lineups, <strong>" + (s.reachable || 0) +
+        "</strong> with an address.</p>" +
+        "<p>It's stored in your account, not in the public repo, so only you can read it. " +
+        "Your phone will pick it up next time you open the tracker.</p>",
+        '<button class="btn btn-primary" data-act="close-modal">Done</button>');
+    } catch (e) {
+      closeModal();
+      openModal("Import failed", "<p>" + esc(e.message) + "</p>",
+        '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+    }
+  });
+  inp.click();
+}
+
+/* ================= the artist contact database =================
+   Loaded from artists.js, which is static and NOT synced: 1.26MB of reference data
+   cannot fit a 1MB Firestore doc, and it is identical for everyone anyway.
+   723 acts across 17 lineups, 972 addresses, every one carrying its source URL. */
+
+function akey(n) { return (n || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+// Alternate billings resolve here too: a feed printing "DJ Kendo" must find Kendo,
+// or the chip silently shows no address despite one being on file.
+function artistRec(name) {
+  const A = window.ARTIST_ACTS || {};
+  const r = A[akey(name)];
+  return r && r.alias ? A[r.alias] || r : r || null;
+}
+
+function artistBest(name) { return (window.ARTIST_LOOKUP || {})[akey(name)] || null; }
+
+const ROLE_LOCAL = ["mgmt", "management", "manager", "booking", "book", "info", "contact",
+  "press", "media", "demos", "demo", "submission", "team", "office", "support", "admin",
+  "agency", "talent", "sales", "hello", "inquiries", "enquiries"];
+const FREE_HOST = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
+  "icloud.com", "me.com", "protonmail.com", "proton.me", "aol.com", "live.com", "msn.com"];
+
+/* Is this address the act themselves, or a desk? A pitch written for a manager reads
+   as absurd when it lands in the artist's own inbox, so the wording has to know.
+   A role mailbox is never the artist even on the artist's own domain, and the act's
+   name at an agency is an alias FOR them, not them. */
+function isArtistDirect(name, email) {
+  const em = (email || "").toLowerCase();
+  if (em.indexOf("@") < 0) return false;
+  const nm = akey(name);
+  if (nm.length < 3) return false;
+  const local = akey(em.split("@")[0]);
+  const dom = em.split("@")[1];
+  if (ROLE_LOCAL.some((r) => local.indexOf(r) >= 0)) return false;
+  if (FREE_HOST.indexOf(dom) < 0 && akey(dom.split(".")[0]).indexOf(nm) < 0) return false;
+  return local.indexOf(nm) >= 0;
+}
+
+// Already booked that day? Said once at the top of a lineup, never per row.
+function clash(iso) {
+  if (!iso) return null;
+  return (DB.gigs || []).find((g) => g.date === iso && g.status !== "cancelled") || null;
+}
+
+/* One person often represents several acts. Cold-pitching a manager you are already
+   mid-thread with about a different artist is a real way to burn a contact, so the
+   check looks across contacts AND the whole outreach pipeline, not just this act. */
+function warmFor(email) {
+  if (!email) return null;
+  const e = email.toLowerCase();
+  const c = (DB.clients || []).find((x) => (x.email || "").toLowerCase() === e);
+  if (c) return { kind: "client", who: c.name };
+  const o = (DB.outreach || []).find((x) => (x.email || "").toLowerCase() === e &&
+    x.status && x.status !== "to-contact");
+  return o ? { kind: "outreach", who: o.venue } : null;
+}
+
+/* The rows a festival card renders. Acts come from the database; anything you have
+   already worked keeps ITS row, so status, notes and follow-ups survive untouched.
+   Acts with no row yet get a synthetic one so they can be picked before they exist. */
+function lineupRows(fest, rows) {
+  const keys = (window.ARTIST_FESTIVALS || {})[fest];
+  if (!keys) return rows.filter((r) => r.festival === fest);
+  const byKey = new Map();
+  rows.forEach((r) => { if (r.venue) byKey.set(akey(r.venue), r); });
+  const A = window.ARTIST_ACTS || {};
+  return keys.map((k) => {
+    const rec = A[k] || {};
+    const name = rec.n || k;
+    const existing = byKey.get(k);
+    if (existing) {
+      // A row you made keeps its own address; the database only fills a blank.
+      if (!existing.email) {
+        const b = artistBest(name);
+        if (b) existing.email = b.e;
+      }
+      return existing;
+    }
+    const b = artistBest(name);
+    return { id: "a:" + k, venue: name, festival: fest, email: b ? b.e : "",
+             status: "to-contact", _db: true };
+  });
+}
+
+// Turn a synthetic row into a real one the moment it needs to persist anything.
+function materialise(r) {
+  if (!r._db) return r;
+  const real = { id: uid(), venue: r.venue, festival: r.festival, email: r.email || "",
+                 status: "to-contact", kind: "festival", notes: "" };
+  DB.outreach = DB.outreach || [];
+  DB.outreach.push(real);
+  return real;
+}
+
 /* ---------- lineups: a card per festival, artists as pickable buttons ---------- */
 
 function outreachLineups(rows) {
   const groups = new Map();
+  // Database lineups render directly — there is nothing to import.
+  Object.keys(window.ARTIST_FESTIVALS || {}).forEach((f) => groups.set(f, lineupRows(f, rows)));
+  // Anything you added by hand under a name the database doesn't know keeps its card.
   rows.forEach((r) => {
-    if (!r.festival) return;
-    if (!groups.has(r.festival)) groups.set(r.festival, []);
-    groups.get(r.festival).push(r);
+    if (!r.festival || groups.has(r.festival)) return;
+    groups.set(r.festival, rows.filter((x) => x.festival === r.festival));
   });
 
   if (!groups.size) {
@@ -2542,8 +2778,10 @@ function outreachLineups(rows) {
       '<span class="lineup-meta">' + list.length + " act" + (list.length === 1 ? "" : "s") +
       " \u00b7 " + withEmail.length + " reachable</span>" +
       (pickedHere.length
-        ? '<button class="btn btn-sm btn-primary" data-act="email-picked" data-fest="' + esc(fest) +
-          '">\u2709 Email ' + pickedHere.length + " selected</button>"
+        ? '<button class="btn btn-sm btn-primary" data-act="draft-each" data-fest="' + esc(fest) +
+          '">\u2709 Draft ' + pickedHere.length + " separately</button>" +
+          '<button class="btn btn-sm" data-act="email-picked" data-fest="' + esc(fest) +
+          '" title="One draft, everyone in BCC">One email, BCC</button>'
         : '<button class="btn btn-sm" data-act="pick-all" data-fest="' + esc(fest) +
           '">Select all reachable</button>') +
       "</div>";
@@ -2561,6 +2799,7 @@ function outreachLineups(rows) {
 
     html += '<div class="legend legend-sm">' +
       '<span><i class="dot dot-new"></i>not contacted</span>' +
+      '<span><i class="dot dot-draft"></i>drafted, not sent</span>' +
       '<span><i class="dot dot-sent"></i>emailed</span>' +
       '<span><i class="dot dot-pick"></i>selected</span></div>';
 
@@ -2569,7 +2808,9 @@ function outreachLineups(rows) {
       html += '<p class="muted" style="font-size:13px;margin:10px 0 0">Nothing matches that filter.</p>';
     } else {
       html += '<div class="pickgrid">' + shown.map((r) => {
-        const cls = sel[r.id] ? "picked" : r.status !== "to-contact" ? "sent" : "";
+        const cls = sel[r.id] ? "picked"
+          : r.status !== "to-contact" ? "sent"
+          : r.draftedAt ? "drafted" : "";
         const sub = r.email ? esc(r.email) : "no email on file yet";
         return '<button class="pick-act ' + cls + '" data-act="pick-act" data-id="' + r.id + '">' +
           '<span class="pick-name">' + esc(r.venue) + "</span>" +
@@ -2635,17 +2876,129 @@ function togglePick(id) {
 
 function pickAllReachable(fest) {
   state.picked = state.picked || {};
-  (DB.outreach || []).forEach((r) => {
-    if (r.festival === fest && r.email) state.picked[r.id] = true;
+  lineupRows(fest, (DB.outreach || []).slice()).forEach((r) => {
+    if (r.email) state.picked[r.id] = true;
   });
   render();
+}
+
+/* Jay's bulkDraft: one draft PER artist, because a pitch that names the act is the
+   whole point of having a lineup. Queued rather than fired at once — a browser asked
+   for ninety windows in a loop drops most of them silently.
+   Acts already contacted are skipped VISIBLY; the button used to appear to do nothing. */
+function draftEach(fest) {
+  const sel = state.picked || {};
+  const all = lineupRows(fest, (DB.outreach || []).slice()).filter((r) => sel[r.id]);
+  const fresh = all.filter((r) => r.email && r.status === "to-contact");
+  const already = all.filter((r) => r.email && r.status !== "to-contact");
+  const missing = all.filter((r) => !r.email);
+
+  if (!fresh.length) {
+    openModal("Nothing to draft",
+      "<p>" + (already.length
+        ? "Everyone you picked has already been contacted."
+        : "None of the acts you picked have an address on file.") + "</p>",
+      '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+    return;
+  }
+
+  const warm = fresh.map((r) => ({ r: r, w: warmFor(r.email) })).filter((x) => x.w);
+  const go = () => {
+    fresh.forEach((r, i) => {
+      setTimeout(() => window.open(pitchUrl(r, fest), "_blank", "noopener"), i * 600);
+    });
+    /* Opening a draft is NOT contact. Close eighty of those tabs without sending and a
+       tracker that already said "contacted" is lying to you about who you have pitched.
+       Record that it was drafted; you mark them sent once you have actually sent them. */
+    const ids = fresh.map((r) => {
+      const real = materialise(r);
+      real.draftedAt = todayISO();
+      return real.id;
+    });
+    state._justDrafted = ids;
+    state.picked = {};
+    save();
+    render();
+
+    openModal("Drafting " + fresh.length,
+      "<p>Opening <strong>" + fresh.length + "</strong> Gmail draft" +
+      (fresh.length === 1 ? "" : "s") + ", one per act, a moment apart so none are dropped.</p>" +
+      "<p>They're marked <em>drafted</em>, not contacted — tell me once you've actually " +
+      "sent them and I'll move them along.</p>" +
+      (already.length ? '<p class="muted" style="font-size:13px">' + already.length +
+        " already contacted, skipped.</p>" : "") +
+      (missing.length ? '<p class="muted" style="font-size:13px">' + missing.length +
+        " with no address, skipped.</p>" : ""),
+      '<button class="btn" data-act="close-modal">Not yet</button>' +
+      '<button class="btn btn-primary" data-act="mark-drafted-sent">Mark ' + fresh.length +
+      " as contacted</button>", { noFocus: true });
+  };
+
+
+  if (warm.length) {
+    // One manager often covers several acts. Say so before writing them a cold pitch.
+    openModal("You already know " + (warm.length === 1 ? "one of these" : "some of these"),
+      "<p>" + warm.map((x) => "<strong>" + esc(x.r.venue) + "</strong> — " +
+        esc(x.r.email) + " is already " +
+        (x.w.kind === "client" ? "a client (" + esc(x.w.who) + ")"
+                               : "in your pipeline for " + esc(x.w.who))).join("<br>") +
+      "</p><p>A cold pitch to someone you're mid-conversation with reads badly. " +
+      "Draft anyway, or cancel and write to them yourself?</p>",
+      '<button class="btn" data-act="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" data-act="draft-anyway" data-fest="' + esc(fest) +
+      '">Draft all ' + fresh.length + "</button>");
+    state._pendingDraft = go;
+    return;
+  }
+  go();
+}
+
+/* You sent them. Only now do they count as contacted. */
+function markDraftedSent() {
+  const ids = state._justDrafted || [];
+  state._justDrafted = null;
+  let n = 0;
+  (DB.outreach || []).forEach((r) => {
+    if (ids.indexOf(r.id) >= 0 && r.status === "to-contact") {
+      r.status = "contacted";
+      r.lastContact = todayISO();
+      n++;
+    }
+  });
+  if (n) save();
+  return n;
+}
+
+/* The pitch itself. Wording changes depending on whether the address is the act's own
+   inbox or their manager's — asking a manager "if you need media" is right, asking the
+   artist that about themselves is not. */
+function pitchUrl(r, fest) {
+  const s = DB.settings;
+  const me = s.yourName || s.businessName || "";
+  const city = s.eventCity || "LA";
+  const best = artistBest(r.venue);
+  const direct = isArtistDirect(r.venue, r.email);
+  const who = !direct && best && best.p ? best.p.split(/\s+/)[0] : "";
+
+  const body = "Hi " + (who || "there") + ",\n\n" +
+    "I'm " + me + ", a photo and video shooter based in " + city + ".\n\n" +
+    (direct
+      ? "I'll be at " + fest + " and would love to shoot your set."
+      : "I'll be at " + fest + " and wanted to ask whether " + r.venue +
+        " needs any coverage for their set.") + "\n\n" +
+    "Happy to send over recent work if it's useful.\n\nThanks,\n" + me;
+
+  return "https://mail.google.com/mail/?view=cm&fs=1" +
+    "&to=" + encodeURIComponent(r.email) +
+    "&su=" + encodeURIComponent(r.venue + " — " + fest + " coverage") +
+    "&body=" + encodeURIComponent(body);
 }
 
 // Opens one Gmail draft addressed to everyone picked. Addresses go in BCC so
 // the acts can't see each other's contact details.
 function emailPicked(fest) {
   const sel = state.picked || {};
-  const chosen = (DB.outreach || []).filter((r) => sel[r.id] && r.festival === fest);
+  const chosen = lineupRows(fest, (DB.outreach || []).slice()).filter((r) => sel[r.id]);
   const reachable = chosen.filter((r) => r.email);
   const missing = chosen.filter((r) => !r.email);
 
@@ -2674,7 +3027,8 @@ function emailPicked(fest) {
 
   // Reaching out counts as contact, so move them along the pipeline.
   reachable.forEach((r) => {
-    if (r.status === "to-contact") { r.status = "contacted"; r.lastContact = todayISO(); }
+    const real = materialise(r);
+    if (real.status === "to-contact") { real.status = "contacted"; real.lastContact = todayISO(); }
   });
   state.picked = {};
   save();
@@ -2977,6 +3331,22 @@ VIEWS.settings = function () {
     '<div class="field"><label>Look ahead <span class="hint">days</span></label>' +
     '<input type="number" name="eventLookaheadDays" value="' + esc(s.eventLookaheadDays) + '"></div>' +
     '<button type="button" class="btn" data-act="refresh-events">Refresh shows now</button>' +
+    "</div>" +
+
+    '<div class="card card-pad">' +
+    '<p class="card-title">Artist database</p>' +
+    (window.ARTIST_STATS
+      ? '<p class="muted" style="font-size:13.5px;margin-top:0"><strong>' +
+        window.ARTIST_STATS.acts + "</strong> acts across <strong>" +
+        window.ARTIST_STATS.festivals + "</strong> lineups, <strong>" +
+        window.ARTIST_STATS.reachable + "</strong> with an address on file.</p>"
+      : '<p class="muted" style="font-size:13.5px;margin-top:0">Not imported yet. ' +
+        "The Outreach tab shows only lineups you've added by hand until it is.</p>") +
+    '<p class="muted" style="font-size:13px">Stored in your account, never in the ' +
+    "repo \u2014 this site is public, so a file here would publish every address in it. " +
+    "Generate the file with <code>python3 tools/gen_artists_js.py --apply</code>.</p>" +
+    '<button type="button" class="btn" data-act="import-artists">' +
+    (window.ARTIST_STATS ? "Re-import database" : "Import database") + "</button>" +
     "</div>" +
 
     '<div class="card card-pad">' +
@@ -3390,6 +3760,16 @@ document.addEventListener("click", (e) => {
     case "pick-act": togglePick(id); break;
     case "pick-all": pickAllReachable(el.dataset.fest); break;
     case "email-picked": emailPicked(el.dataset.fest); break;
+    case "draft-each": draftEach(el.dataset.fest); break;
+    case "import-artists": importArtistDB(); break;
+    case "draft-anyway": {
+      const go = state._pendingDraft;
+      state._pendingDraft = null;
+      closeModal();
+      if (go) go();
+      break;
+    }
+    case "mark-drafted-sent": markDraftedSent(); closeModal(); render(); break;
     case "import-lineup": importLineupDialog(); break;
     case "save-lineup": saveLineup(); break;
     case "new-outreach": outreachForm(null); break;
@@ -3615,6 +3995,7 @@ async function start() {
     state.view = "settings";
   }
   render();
+  loadArtistDB();      // not awaited: the app is usable before it lands
   autoRefreshIfStale();
 }
 

@@ -125,6 +125,43 @@ const Cloud = {
     if (!res.ok) throw new Error(await describeError(res));
     return true;
   },
+
+  /* ---------- reference data ----------
+     The artist contact database: 972 booking and management addresses. It lives HERE,
+     under the account's own document tree, rather than as a file next to the page,
+     because this site is served from a PUBLIC GitHub repo — a static artists.js would
+     publish every one of those addresses to the open internet and to git history.
+     Behind the uid rule it is readable only by the signed-in owner.
+     ~290 KB, comfortably inside the 1 MB per-document limit. */
+
+  refUrl(name) { return FIRESTORE + "/trackers/" + this.session.uid + "/ref/" + name; },
+
+  async loadRef(name) {
+    const token = await this.token();
+    const res = await fetch(this.refUrl(name), { headers: { Authorization: "Bearer " + token } });
+    if (res.status === 404) return null;                 // not imported yet
+    if (!res.ok) throw new Error(await describeError(res));
+    const out = await res.json();
+    const raw = out.fields && out.fields.json && out.fields.json.stringValue;
+    if (!raw) return null;
+    return { data: JSON.parse(raw), updatedAt: (out.fields.updatedAt || {}).timestampValue || null };
+  },
+
+  async saveRef(name, data) {
+    const token = await this.token();
+    const res = await fetch(this.refUrl(name), {
+      method: "PATCH",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields: {
+          json: { stringValue: JSON.stringify(data) },
+          updatedAt: { timestampValue: new Date().toISOString() },
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(await describeError(res));
+    return true;
+  },
 };
 
 function friendlyAuthError(out) {
