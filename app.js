@@ -596,8 +596,83 @@ function todoCard() {
       openCount + " left</span>" : "") + "</p>" +
     '<div class="todo-add">' +
     '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200">' +
-    '<button class="btn btn-sm" data-act="add-todo">Add</button></div>' +
+    '<button class="btn btn-sm" data-act="add-todo">Add</button>' +
+    '<button class="btn btn-sm" data-act="new-task" title="With a category, due date and notes">\u2699</button></div>' +
     '<div id="todo-list">' + todoListHTML() + "</div>";
+}
+
+const TASK_CATEGORIES = ["Urgent", "Money", "Client", "Shoot", "Delivery",
+                         "Waiting", "Errand", "Admin"];
+
+// "due Oct 1", or "overdue · Aug 19" once the date has passed.
+function dueTag(t) {
+  if (!t.due) return "";
+  const late = t.due < todayISO();
+  return '<span class="duetag' + (late ? " late" : "") + '">' +
+    (late ? "overdue \u00b7 " : "due ") +
+    esc(fmtDate(t.due, { month: "short", day: "numeric" })) + "</span>";
+}
+
+// One task, with everything it carries. Used in the list and in the Top 3.
+function taskRow(t, opts) {
+  const o = opts || {};
+  const meta = (t.category ? '<span class="chip">' + esc(t.category) + "</span>" : "") + dueTag(t);
+  const open = state.openNotes && state.openNotes[t.id];
+  return '<div class="taskrow' + (t.done ? " done" : "") + '"' +
+    (o.draggable ? ' draggable="true" data-todo-id="' + t.id + '"' : "") + ">" +
+    (o.draggable ? '<span class="grip" aria-hidden="true">\u22ee\u22ee</span>' : "") +
+    '<input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '"' +
+      (t.done ? " checked" : "") + ">" +
+    '<div class="taskbody">' +
+    '<div class="tasktitle">' + esc(t.text) + "</div>" +
+    (meta ? '<div class="taskmeta">' + meta + "</div>" : "") +
+    (t.notes
+      ? '<div class="tasknotes' + (open ? " open" : "") + '">' + esc(t.notes) + "</div>" +
+        '<button class="notesmore" data-act="toggle-notes" data-id="' + t.id + '">' +
+        (open ? "Show less" : "Show more") + "</button>"
+      : "") +
+    "</div>" +
+    '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit">\u270e</button>' +
+    (o.restore
+      ? '<button class="btn btn-sm" data-act="toggle-todo" data-id="' + t.id + '">Restore</button>'
+      : '<button class="iconbtn" data-act="delete-todo" data-id="' + t.id + '" title="Remove">\u00d7</button>') +
+    "</div>";
+}
+
+function taskForm(rec) {
+  const t = rec || { id: null, text: "", category: "", due: "", notes: "" };
+  const body =
+    '<form id="task-form">' +
+    '<div class="field"><label>Task</label>' +
+    '<input name="text" value="' + esc(t.text) + '" required></div>' +
+    '<div class="field-row">' +
+    '<div class="field"><label>Category <span class="hint">optional</span></label>' +
+    '<select name="category">' + selectOptions(TASK_CATEGORIES, t.category, "\u2014 none \u2014") +
+    "</select></div>" +
+    '<div class="field"><label>Due <span class="hint">optional</span></label>' +
+    '<input type="date" name="due" value="' + esc(t.due || "") + '"></div>' +
+    "</div>" +
+    '<div class="field"><label>Notes <span class="hint">the detail you\u2019d otherwise forget</span></label>' +
+    '<textarea name="notes" rows="6">' + esc(t.notes || "") + "</textarea></div>" +
+    "</form>";
+  openModal(t.id ? "Edit task" : "New task", body,
+    (t.id ? '<button class="btn btn-danger btn-sm" data-act="delete-todo" data-id="' + t.id + '">Delete</button>' : "") +
+    '<div class="spacer"></div><button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="save-task" data-id="' + (t.id || "") + '">Save</button>');
+}
+
+function saveTask(id) {
+  const v = formValues($("#task-form"));
+  if (!v.text.trim()) { alert("Give the task a name."); return; }
+  DB.todos = DB.todos || [];
+  const existing = id ? DB.todos.find((x) => x.id === id) : null;
+  const rec = existing || { id: uid(), done: false, created: todayISO(), doneAt: null,
+                            top: false, topRank: null };
+  Object.assign(rec, {
+    text: v.text.trim(), category: v.category, due: v.due, notes: v.notes.trim(),
+  });
+  if (!existing) DB.todos.push(rec);
+  save(); closeModal(); render();
 }
 
 function todoListHTML() {
@@ -605,19 +680,18 @@ function todoListHTML() {
   if (!open.length) {
     const slotted = (DB.todos || []).some((t) => t.top && !t.done);
     return '<p class="muted" style="font-size:13.5px;margin:12px 0 0">' +
-      (slotted
-        ? "Everything left is up in your Top 3."
-        : "Nothing on the list. Chase an invoice, email a venue, book a shoot \u2014 " +
-          "whatever's next.") + "</p>";
+      (slotted ? "Everything left is up in your Top 3."
+               : "Nothing on the list. Chase an invoice, email a venue, book a shoot \u2014 " +
+                 "whatever's next.") + "</p>";
   }
-  return open.map((t) =>
-    '<label class="todo" draggable="true" data-todo-id="' + t.id + '">' +
-    '<span class="grip" aria-hidden="true">\u22ee\u22ee</span>' +
-    '<input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '">' +
-    '<span class="todo-text">' + esc(t.text) + "</span>" +
-    '<button class="todo-del" data-act="delete-todo" data-id="' + t.id + '" title="Remove">\u00d7</button>' +
-    "</label>").join("");
+  // Overdue first, then whatever else has a date, then the undated.
+  const sorted = open.slice().sort((a, b) => {
+    if (!!a.due !== !!b.due) return a.due ? -1 : 1;
+    return (a.due || "").localeCompare(b.due || "");
+  });
+  return sorted.map((t) => taskRow(t, { draggable: true })).join("");
 }
+
 
 
 
@@ -731,7 +805,7 @@ function addTodo() {
   if (!text) { input.focus(); return; }
   DB.todos = DB.todos || [];
   DB.todos.push({ id: uid(), text: text, done: false, created: todayISO(), doneAt: null,
-                  top: false, topRank: null });
+                  top: false, topRank: null, category: "", due: "", notes: "" });
   save();
   refreshTodoList();
   // On Today the whole screen re-renders (the Top 3 slots depend on this list),
@@ -914,10 +988,9 @@ VIEWS.today = function () {
   for (let i = 0; i < 3; i++) {
     const t = todos.find((x) => x.top && !x.done && x.topRank === i);
     html += t
-      ? '<div class="slot filled" data-slot="' + i + '" draggable="true" data-todo-id="' + t.id + '">' +
+      ? '<div class="slot filled" data-slot="' + i + '">' +
         '<span class="slot-n">' + (i + 1) + "</span>" +
-        '<label class="slot-task"><input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '">' +
-        '<span class="todo-text">' + esc(t.text) + "</span></label>" +
+        '<div class="slot-task">' + taskRow(t, { draggable: true }) + "</div>" +
         '<button class="slot-x" data-act="untop-todo" data-id="' + t.id + '" title="Remove from Top 3">\u00d7</button></div>'
       : '<div class="slot" data-slot="' + i + '" data-act="pick-top" data-rank="' + i + '">' +
         '<span class="slot-n">' + (i + 1) + "</span>" +
@@ -941,10 +1014,10 @@ VIEWS.today = function () {
     html += '<button class="disclosure" data-act="toggle-done">' +
       (state.showDone ? "\u25be" : "\u25b8") + " Completed <span class=\"count\">" + done.length + "</span></button>";
     if (state.showDone) {
-      html += '<div class="card card-pad todo-card">' + done.map((t) =>
-        '<label class="todo done"><input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '" checked>' +
-        '<span class="todo-text">' + esc(t.text) + "</span>" +
-        '<button class="todo-del" data-act="delete-todo" data-id="' + t.id + '">\u00d7</button></label>').join("") +
+      // Newest first, and each one can be put back rather than only deleted.
+      const recent = done.slice().sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
+      html += '<div class="card card-pad todo-card">' +
+        recent.map((t) => taskRow(t, { restore: true })).join("") +
         '<button class="btn btn-sm btn-ghost" data-act="clear-done" style="margin-top:10px">Clear ' +
         done.length + " finished</button></div>";
     }
@@ -3201,6 +3274,15 @@ document.addEventListener("click", (e) => {
       break;
 
     case "add-todo": addTodo(); break;
+    case "new-task": taskForm(null); break;
+    case "edit-todo": taskForm((DB.todos || []).find((x) => x.id === id)); break;
+    case "save-task": saveTask(id || null); break;
+    case "toggle-notes": {
+      state.openNotes = state.openNotes || {};
+      state.openNotes[id] = !state.openNotes[id];
+      render();
+      break;
+    }
     case "toggle-done": state.showDone = !state.showDone; render(); break;
     case "pick-top": {
       // only the empty part of the slot opens the picker
