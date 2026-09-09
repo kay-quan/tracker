@@ -366,28 +366,38 @@ function renderHeader() {
   const today = new Date().toLocaleDateString(undefined,
     { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
-  // YTD and the weekly pace belong side by side - one says where you are, the
-  // other what it takes to land the year. The date drops to the quieter line.
+  // One quiet line under the title: the date, then where you are and what it takes
+  // to land the year. Everything a glance should answer, and nothing else.
   $("#app-meta").innerHTML =
     '<span class="meta-line">' +
+    '<span class="meta-date">' + esc(today) + "</span>" +
     '<span class="meta-stat">YTD net <strong>' + money(f.net) + "</strong></span>" +
     (f.goal
       ? '<span class="meta-stat" title="To reach ' + esc(money(f.goal)) + " by year end, with " +
         f.weeksLeft.toFixed(1) + ' weeks to go">Goal pace <strong>' + money(f.pace) + "</strong>/wk</span>"
       : '<a href="#" class="meta-stat" data-act="set-goal">Set an income goal</a>') +
-    "</span>" +
-    '<span class="meta-line"><span class="muted">' + esc(today) + "</span>" +
-    '<span class="live"><i></i>live</span></span>';
+    "</span>";
 }
 
 /* ---------- bottom tab bar ---------- */
 
+/* Line icons rather than glyphs: a text "$" or "\u2709" sits on the text baseline and
+   reads as a character, not an icon. These are drawn on the same 24-unit grid and
+   inherit currentColor, so the active tab tints them with everything else. */
+const TAB_ICONS = {
+  today: '<path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+  money: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.5-.8-1.4-1.2-2.5-1.2-1.5 0-2.7.8-2.7 2s1.2 1.7 2.7 2 2.8.8 2.8 2-1.3 2-2.8 2c-1.1 0-2-.4-2.5-1.2M12 6.5V8m0 8v1.5"/>',
+  outreach: '<path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/>',
+  invoices: '<path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h12a1 1 0 001-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+};
+
 const TABS = [
-  { view: "today", label: "Today", icon: "\u2713" },
-  { view: "calendar", label: "Calendar", icon: "\u25a6" },
-  { view: "money", label: "Money", icon: "$" },
-  { view: "outreach", label: "Outreach", icon: "\u2709" },
-  { view: "invoices", label: "Invoices", icon: "\u25a4" },
+  { view: "today", label: "Today" },
+  { view: "calendar", label: "Calendar" },
+  { view: "money", label: "Money" },
+  { view: "outreach", label: "Outreach" },
+  { view: "invoices", label: "Invoices" },
 ];
 
 // Badges flag only what needs a decision from you.
@@ -414,7 +424,7 @@ function renderTabbar() {
     const n = tabBadge(t.view);
     return '<button class="tab' + (current === t.view ? " active" : "") +
       '" data-act="goto" data-view="' + t.view + '">' +
-      '<span class="tab-icon">' + t.icon +
+      '<span class="tab-icon"><svg viewBox="0 0 24 24">' + (TAB_ICONS[t.view] || "") + "</svg>" +
       (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + "</span>" : "") + "</span>" +
       '<span class="tab-label">' + t.label + "</span></button>";
   }).join("");
@@ -645,6 +655,11 @@ function todoCard() {
     '<div id="todo-list">' + todoListHTML() + "</div>";
 }
 
+/* Money reads as owed, Urgent as urgent, Delivery/Shoot as work in hand. Anything
+   unmapped stays the neutral chip. */
+const CATEGORY_TONE = { Urgent: "urgent", Money: "money", Client: "accent",
+                        Shoot: "good", Delivery: "good", Waiting: "money" };
+
 const TASK_CATEGORIES = ["Urgent", "Money", "Client", "Shoot", "Delivery",
                          "Waiting", "Errand", "Admin"];
 
@@ -660,7 +675,9 @@ function dueTag(t) {
 // One task, with everything it carries. Used in the list and in the Top 3.
 function taskRow(t, opts) {
   const o = opts || {};
-  const meta = (t.category ? '<span class="chip">' + esc(t.category) + "</span>" : "") + dueTag(t);
+  const meta = (t.category
+    ? '<span class="chip ' + (CATEGORY_TONE[t.category] || "") + '">' + esc(t.category) + "</span>"
+    : "") + dueTag(t);
   const open = state.openNotes && state.openNotes[t.id];
   return '<div class="taskrow' + (t.done ? " done" : "") + '"' +
     (o.draggable ? ' draggable="true" data-todo-id="' + t.id + '"' : "") + ">" +
@@ -1046,13 +1063,17 @@ VIEWS.today = function () {
   /* ---- all tasks ---- */
   const open = todos.filter((t) => !t.done && !t.top);
   const done = todos.filter((t) => t.done);
+  /* The action sits on the heading, not inside the card: the list below is then a
+     list of tasks and nothing else. The quick-add field stays under it, because
+     typing a title and pressing Enter is how most tasks actually get added. */
   html += '<h2 class="section-head">All tasks' +
-    (open.length ? ' <span class="count">' + open.length + "</span>" : "") + "</h2>";
+    (open.length ? ' <span class="count">' + open.length + "</span>" : "") +
+    '<button class="btn btn-sm section-action" data-act="new-task"' +
+    ' title="With a category, due date and notes">\uff0b New task</button></h2>';
   html += '<div class="card card-pad todo-card">' +
     '<div class="todo-add">' +
     '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200">' +
-    '<button class="btn btn-sm" data-act="add-todo">Add</button>' +
-    '<button class="btn btn-sm" data-act="new-task" title="With a category, due date and notes">\u2699</button></div>' +
+    '<button class="btn btn-sm" data-act="add-todo">Add</button></div>' +
     '<div id="todo-list">' + todoListHTML() + "</div></div>";
 
   if (done.length) {
