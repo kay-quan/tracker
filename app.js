@@ -1213,7 +1213,8 @@ function monthGrid(paint, dayAct) {
   for (let i = 0; i < 42; i++) {
     const iso = isoOf(cur);
     const other = cur.getMonth() !== mm - 1;
-    const cls = "cal-day" + (other ? " other" : "") + (iso === today ? " today" : "");
+    const cls = "cal-day" + (other ? " other" : "") + (iso === today ? " today" : "") +
+      (dayAct === "local-day" && state.eventDay === iso ? " open" : "");
     html += "<div class=\"" + cls + "\"" + (dayAct ? ' data-act="' + dayAct + '" data-date="' + iso + '"' : "") + ">" +
       '<div class="cal-date">' + cur.getDate() + "</div>" + paint(iso) + "</div>";
     cur.setDate(cur.getDate() + 1);
@@ -1261,6 +1262,8 @@ function gigsCalendar() {
 
 function eventsCalendar() {
   const all = DB.localEvents || [];
+  // An open day from another month would render a panel with no cell to belong to.
+  if (state.eventDay && state.eventDay.slice(0, 7) !== state.calMonth) state.eventDay = null;
   // Edmtrain flags festivals separately from club and venue shows. They're
   // different propositions - multi-day, booked further out - so they can be
   // looked at on their own.
@@ -1321,16 +1324,22 @@ function eventsCalendar() {
       '<div class="cal-event ev-show' + (e.manual ? " ev-mine" : e.festival ? " ev-fest" : "") +
       '" data-act="show-event" data-id="' +
       esc(e.id) + '" title="' + esc(eventTooltip(e)) + '">' +
-      '<span class="ev-who">' + esc(eventWho(e)) + "</span>" +
-      (e.venue ? '<span class="ev-venue">' + esc(e.venue) + "</span>" : "") +
+      '<span class="ev-who">' + esc(eventName(e)) + "</span>" +
+      // Only print the venue when it isn't already doing duty as the name.
+      (e.venue && eventName(e) !== e.venue
+        ? '<span class="ev-venue">' + esc(e.venue) + "</span>" : "") +
       "</div>").join("") +
       (list.length > 3 ? '<div class="cal-more">+' + (list.length - 3) + " more</div>" : "");
   }, "local-day");
 
+  // Clicking a day opens it underneath the grid rather than expanding the cell:
+  // a cell that grows shoves the whole month sideways and reflows the week rows.
+  html += dayPanel(byDate);
+
   html += '<div class="legend"><span><i class="swatch" style="background:#6f5bd1"></i>Show</span>' +
     '<span><i class="swatch" style="background:#c2557a"></i>Festival</span>' +
     '<span><i class="swatch" style="background:#b07d2b"></i>Added by you</span>' +
-    '<span class="muted">Click a day to add a show, or a show for its details.</span></div>';
+    '<span class="muted">Click a day to see what’s on, or a show for its details.</span></div>';
 
   // The grid gives the shape of the month; this lists every show underneath in
   // full, so nothing is hidden behind a "+2 more" or trimmed to fit a cell.
@@ -1353,6 +1362,47 @@ function isNarrow() { return NARROW.matches; }
 
 // Re-render when crossing the breakpoint so the right layout is always showing.
 NARROW.addEventListener("change", () => { if (DB) render(); });
+
+/* The opened day. Sits under the grid, closes on the same click that opened it,
+   and says once at the top whether you are already booked - not on every row. */
+function dayPanel(byDate) {
+  const iso = state.eventDay;
+  if (!iso) return "";
+  const list = (byDate[iso] || []).slice();
+  const day = parseISO(iso);
+  const long = day.toLocaleDateString(undefined,
+    { weekday: "long", month: "long", day: "numeric" });
+  const booked = clash(iso);
+
+  let html = '<div class="daypanel"><div class="daypanel-head">' +
+    "<strong>" + esc(long) + "</strong>" +
+    '<span class="muted">' + (list.length
+      ? list.length + " " + (list.length === 1 ? "show" : "shows")
+      : "nothing listed") + "</span>" +
+    '<button class="btn btn-sm" data-act="new-local-event" data-date="' + esc(iso) +
+    '">＋ Add</button>' +
+    '<button class="daypanel-x" data-act="close-day" title="Close">×</button></div>';
+
+  if (booked) {
+    html += '<div class="daypanel-clash">You’re already booked this day — ' +
+      esc(booked.client || booked.title || "a gig") + ".</div>";
+  }
+
+  html += list.length
+    ? '<div class="daypanel-list">' + list.map((e) =>
+        '<button class="daypanel-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
+        '" data-act="show-event" data-id="' + esc(e.id) + '">' +
+        '<span class="daypanel-dot"></span>' +
+        '<span class="daypanel-name">' + esc(eventName(e)) +
+        (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</span>" +
+        (e.venue && eventName(e) !== e.venue
+          ? '<span class="daypanel-venue">' + esc(e.venue) + "</span>" : "") +
+        "</button>").join("") + "</div>"
+    : '<p class="muted" style="margin:8px 0 0;font-size:13.5px">' +
+      "Nothing listed here yet. Add a show if you know of one.</p>";
+
+  return html + "</div>";
+}
 
 function eventsAgenda(byDate) {
   const dates = Object.keys(byDate)
@@ -1377,13 +1427,13 @@ function eventsAgenda(byDate) {
         '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
         '" data-act="show-event" data-id="' +
         esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
-        '<div class="agenda-venue">' + esc(eventLineup(e)) +
+        '<div class="agenda-venue">' + esc(eventName(e)) +
         (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</div>" +
         // When the feed gave no lineup the headline falls back to the venue,
         // so don't print the venue a second time underneath it.
         (function () {
           const sub = [];
-          if (e.venue && eventLineup(e) !== e.venue) sub.push(esc(e.venue));
+          if (e.venue && eventName(e) !== e.venue) sub.push(esc(e.venue));
           if (e.ages) sub.push(esc(e.ages));
           return sub.length ? '<div class="agenda-name">' + sub.join(" \u00b7 ") + "</div>" : "";
         })() +
@@ -1405,6 +1455,22 @@ function eventWho(e) {
 }
 
 // The complete bill, for places with room to show it.
+/* Name an event by the EVENT, never by the acts on it. "Artist +16 more" reads as a
+   club night headlined by whoever happened to sort first, which is wrong for a
+   festival and unhelpful for a club night, where the venue is the thing you recognise.
+
+   The catch: when the feed gives no name of its own we stored the artist list AS the
+   name, so a naive e.name would print the lineup right back. Detect that and fall
+   back to the venue. */
+function eventName(e) {
+  const acts = (e.artists || []).filter(Boolean);
+  const n = (e.name || "").trim();
+  const isActList = !!n && acts.length > 0 && n === acts.join(", ");
+  if (n && n !== "Untitled event" && !isActList) return n;
+  if (e.venue) return e.venue;
+  return n || "Show";
+}
+
 function eventLineup(e) {
   const acts = (e.artists || []).filter(Boolean);
   if (acts.length) return acts.join(", ");
@@ -2833,7 +2899,8 @@ function outreachLineups(rows) {
           : r.status !== "to-contact" ? "sent"
           : r.draftedAt ? "drafted" : "";
         const sub = r.email ? esc(r.email) : "no email on file yet";
-        return '<button class="pick-act ' + cls + '" data-act="pick-act" data-id="' + r.id + '">' +
+        return '<button class="pick-act ' + cls + '" data-act="pick-act" data-id="' + r.id +
+          '" data-act-name="' + esc(r.venue) + '">' +
           '<span class="pick-name">' + esc(r.venue) + "</span>" +
           '<span class="pick-sub">' + sub + "</span></button>";
       }).join("") + "</div>";
@@ -2889,6 +2956,115 @@ function outreachList(rows, today) {
 // Picking acts to email as a batch. Selection is a transient UI state — it
 // isn't saved, so a reload starts you fresh rather than resurrecting a
 // half-finished pick from days ago.
+/* What's on file for an act, on hover. Every address shows the desk it belongs to
+   and the page it was read from, because an address with no source is a guess.
+   Nothing here is constructed from a name — if it isn't in the database it says so. */
+function actCard(name) {
+  const rec = artistRec(name);
+  const contacts = (rec && rec.c) || [];
+  const leads = (rec && rec.ld) || [];
+
+  let body = "";
+  if (contacts.length) {
+    body += contacts.slice(0, 4).map((c) => {
+      const who = [c.p, c.o].filter(Boolean).join(" · ");
+      return '<div class="ac-row">' +
+        '<div class="ac-mail">' + esc(c.e) +
+        (c.d ? ' <span class="ac-vfy" title="Two independent checkers agreed">✓✓</span>' : "") +
+        (c.r ? ' <span class="ac-stale" title="Flagged as possibly out of date">stale?</span>' : "") +
+        "</div>" +
+        '<div class="ac-meta">' + esc((c.t || "contact").replace(/_/g, " ")) +
+        (who ? " · " + esc(who) : "") +
+        (c.q ? ' <span class="ac-conf ac-' + esc(c.q) + '">' + esc(c.q) + "</span>" : "") +
+        "</div>" +
+        (c.s ? '<a class="ac-src" href="' + esc(c.s) + '" target="_blank" rel="noopener">source</a>' : "") +
+        "</div>";
+    }).join("");
+    if (contacts.length > 4) {
+      body += '<div class="ac-more">+' + (contacts.length - 4) + " more on file</div>";
+    }
+  } else if (leads.length) {
+    // A manager's name with no address is still a lead, and is where the hunt starts.
+    body += leads.map((c) => '<div class="ac-row"><div class="ac-mail">' +
+      esc([c.p, c.o].filter(Boolean).join(" · ") || "known contact") + "</div>" +
+      '<div class="ac-meta">no address on file yet</div></div>').join("");
+  } else if (rec && rec.st === "none-published") {
+    body += '<div class="ac-none">Checked — this act publishes no address.</div>';
+  } else if (rec) {
+    body += '<div class="ac-none">Not researched yet.</div>';
+  } else {
+    body += '<div class="ac-none">Not in the database.</div>';
+  }
+
+  const foot = [];
+  if (rec && rec.ig) {
+    // Every value on file is a full profile URL, not a handle. Link to the URL as
+    // recorded rather than rebuilding one from a name, and show just the handle.
+    const handle = String(rec.ig).replace(/[?#].*$/, "").replace(/\/+$/, "")
+      .split("/").pop().replace(/^@/, "");
+    foot.push('<a class="ac-ig" href="' + esc(rec.ig) +
+      '" target="_blank" rel="noopener">@' + esc(handle) + "</a>");
+  }
+  if (rec && typeof rec.fo === "number") {
+    // The fastest read on whether an act is a realistic door.
+    foot.push('<span class="ac-fo">' + (rec.fo >= 1000
+      ? (rec.fo / 1000).toFixed(rec.fo >= 10000 ? 0 : 1) + "K" : rec.fo) + " followers</span>");
+  }
+  if (rec && rec.ag) foot.push('<span class="ac-fo">' + esc(rec.ag) + "</span>");
+
+  return '<div class="ac-head">' + esc((rec && rec.n) || name) + "</div>" +
+    body + (foot.length ? '<div class="ac-foot">' + foot.join("") + "</div>" : "");
+}
+
+/* ONE hover card, moved and refilled as you go, rather than one per act.
+   A lineup can run to 208 acts and there are 842 buttons across all seventeen; giving
+   each its own card put 13,400 nodes in the page and took a re-render from ~50ms to
+   ~114ms. Since render() runs on every pick, that lag landed on every single click.
+
+   The close delay is what makes the card reachable. A card floating above its button
+   cannot be entered directly — moving toward it leaves the button and the hover ends
+   mid-journey — so it lingers briefly, and stays open while the pointer is on it. */
+let acEl = null, acTimer = null;
+
+function acCard() {
+  if (acEl) return acEl;
+  acEl = document.createElement("div");
+  acEl.className = "actcard";
+  acEl.addEventListener("mouseenter", () => clearTimeout(acTimer));
+  acEl.addEventListener("mouseleave", acHide);
+  document.body.appendChild(acEl);
+  return acEl;
+}
+
+function acHide() { acTimer = setTimeout(() => { if (acEl) acEl.classList.remove("on"); }, 160); }
+
+function acShow(btn) {
+  const name = btn.dataset.actName;
+  if (!name) return;
+  clearTimeout(acTimer);
+  const c = acCard();
+  if (c.dataset.forName !== name) { c.innerHTML = actCard(name); c.dataset.forName = name; }
+  c.classList.add("on");
+
+  const b = btn.getBoundingClientRect();
+  const w = c.offsetWidth, h = c.offsetHeight;
+  // Hang left when there isn't room to the right; drop below when there isn't room above.
+  let left = b.left;
+  if (left + w > window.innerWidth - 12) left = Math.max(12, b.right - w);
+  const above = b.top - h - 8;
+  c.style.left = Math.round(left + window.scrollX) + "px";
+  c.style.top = Math.round((above > 8 ? above : b.bottom + 8) + window.scrollY) + "px";
+}
+
+document.addEventListener("mouseover", (e) => {
+  const btn = e.target.closest && e.target.closest(".pick-act");
+  if (btn) acShow(btn);
+});
+document.addEventListener("mouseout", (e) => {
+  const btn = e.target.closest && e.target.closest(".pick-act");
+  if (btn && !(e.relatedTarget && acEl && acEl.contains(e.relatedTarget))) acHide();
+});
+
 function togglePick(id) {
   state.picked = state.picked || {};
   if (state.picked[id]) delete state.picked[id]; else state.picked[id] = true;
@@ -3585,10 +3761,12 @@ document.addEventListener("click", (e) => {
   if (act === "backdrop") { if (e.target === el) closeModal(); return; }
   if (act === "cal-day") { if (e.target === el || e.target.classList.contains("cal-date")) newGigOn(el.dataset.date); return; }
   if (act === "local-day") {
+    // Clicking a show inside the cell opens that show; clicking the day itself
+    // opens the day. Toggling on the same day closes it again.
     if (e.target === el || e.target.classList.contains("cal-date")) {
-      localEventForm(null);
-      const f = $("#local-event-form");
-      if (f) { f.date.value = el.dataset.date; f.name.focus(); }
+      const d = el.dataset.date;
+      state.eventDay = state.eventDay === d ? null : d;
+      render();
     }
     return;
   }
@@ -3754,7 +3932,14 @@ document.addEventListener("click", (e) => {
 
     case "cal-mode": state.calMode = el.dataset.mode; render(); break;
     case "event-kind": state.eventKind = el.dataset.key; render(); break;
-    case "new-local-event": localEventForm(null); break;
+    case "close-day": state.eventDay = null; render(); break;
+    case "new-local-event": {
+      localEventForm(null);
+      // Adding from an open day should already know which day that is.
+      const d = el.dataset.date;
+      if (d) { const f = $("#local-event-form"); if (f) f.date.value = d; }
+      break;
+    }
     case "edit-local-event": {
       closeModal();
       localEventForm((DB.localEvents || []).find((x) => String(x.id) === String(id)));
