@@ -8,8 +8,9 @@ backups/
 # privately by Jay. This repo is PUBLIC and serves GitHub Pages, so anything committed
 # here is published to the open internet and stays in git history forever.
 # It is delivered to the app through Firestore instead, behind the uid rule.
-public/artists.js
+# Regenerate with: python3 tools/gen_artists_js.py --apply
 artists.payload.json
+artists.js
 
 # Local cruft
 __pycache__/
