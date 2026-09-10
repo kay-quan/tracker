@@ -311,39 +311,42 @@ td.actions .btn { margin-left: 4px; }
 }
 .cal-head h2 { margin: 0; font-size: 18px; min-width: 190px; letter-spacing: -0.01em; }
 
+/* Days are separate cards with room between them, the way Jay's reads. It used to
+   be a hairline table -- one border-coloured panel showing through 1px gaps -- which
+   packed the month into a single solid block with no air in it. */
 .cal-grid {
   display: grid;
   /* minmax(0, 1fr) not 1fr: a bare fr track floors at min-content, so a day
      holding a long venue name widens its column and squeezes the rest. This
      keeps all seven days exactly equal whatever is in them. */
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  gap: 1px;
-  box-shadow: var(--shadow);
+  gap: 4px;
 }
 .cal-dow {
-  background: var(--surface-2);
-  padding: 8px 6px;
+  padding: 4px 0 2px;
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: var(--ink-3);
-  font-weight: 620;
+  font-weight: 700;
   text-align: center;
 }
 .cal-day {
   background: var(--surface);
-  min-height: 118px;
-  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 6px 5px;
   cursor: pointer;
   position: relative;
-  transition: background 0.1s;
+  overflow: hidden;
+  transition: background 0.1s, border-color 0.1s;
 }
-.cal-day:hover { background: var(--surface-2); }
-.cal-day.other { background: #fbfaf8; }
+/* Gig cells hold a couple of one-line chips; Local Events puts a name over a venue
+   on each row, so it needs the extra height. */
+.cal-grid.gigs .cal-day { min-height: 88px; }
+.cal-grid.events .cal-day { min-height: 124px; }
+.cal-day:hover { border-color: var(--ink-3); }
+.cal-day.other { opacity: 0.45; }
 .cal-day.other .cal-date { color: var(--border-strong); }
 .cal-date { font-size: 12.5px; color: var(--ink-2); font-weight: 560; }
 .cal-day.today .cal-date {
@@ -466,7 +469,6 @@ td.actions .btn { margin-left: 4px; }
     --chip: #2A2F33;
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.22);
   }
-  .cal-day.other { background: #191D1F; }
   .cal-day.today .cal-date { background: var(--ink); color: #141719; }
   .pill-gray { background: var(--chip); color: var(--ink-2); }
   .pill-blue { background: #23323f; color: #8fb8dd; }
@@ -1269,8 +1271,7 @@ body[data-view="login"] { padding-bottom: 0; }
   text-overflow: ellipsis;
 }
 
-/* Two-line events need more room than single-line ones did. */
-.cal-day { min-height: 142px; }
+
 
 /* The lineup, given top billing in the event popup. */
 .lineup {
@@ -1876,7 +1877,8 @@ main > .section-head:first-child { margin-top: 4px; }
    Shaped after Jay's Money tab: three small month cards showing made / owed /
    projected, an owed table you can tick off, and everything collected below it. */
 
-.monthstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.monthstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px; margin: 12px 0 14px; }
 .mcard { padding: 13px 15px; }
 .mcard h3 { font-size: 13px; font-weight: 700; margin: 0 0 6px; }
 .mline {
@@ -1935,7 +1937,8 @@ td.muted { color: var(--ink-3); }
    so the money and the running total live in the list next to them rather than
    being crammed into a 74px box. */
 
-.calwrap { display: grid; grid-template-columns: minmax(0, 1fr) 264px; gap: 14px; align-items: start; }
+.calwrap { display: grid; grid-template-columns: minmax(0, 1fr) 264px; gap: 14px;
+  align-items: start; margin-top: 4px; }
 @media (max-width: 900px) { .calwrap { grid-template-columns: minmax(0, 1fr); } }
 
 /* Stat cards over the calendar */

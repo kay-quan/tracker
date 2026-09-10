@@ -1375,7 +1375,7 @@ function monthGrid(paint, dayAct) {
   const start = new Date(first);
   start.setDate(1 - first.getDay());
 
-  let html = '<div class="cal-grid">';
+  let html = '<div class="cal-grid ' + (dayAct === "local-day" ? "events" : "gigs") + '">';
   ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach((d) => {
     html += '<div class="cal-dow">' + d + "</div>";
   });
