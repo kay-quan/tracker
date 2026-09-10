@@ -1782,6 +1782,11 @@ VIEWS.invoices = function () {
 
   html += '<div class="btn-row">' +
     '<button class="btn btn-primary" data-act="new-invoice">New invoice</button>' +
+    /* Money that arrived without an invoice - a cash gig, a past job, a deposit -
+       still belongs in the year's total. It is logged here rather than requiring
+       an invoice to be raised and immediately marked paid. */
+    '<button class="btn" data-act="new-income" title="Money you were paid without ' +
+    'raising an invoice">Log a payment</button>' +
     (invs.length ? '<button class="btn" data-act="goto" data-view="clients">Clients</button>' : "") +
     "</div>";
 
@@ -1977,7 +1982,9 @@ function invoiceEditor(id) {
     '<button class="btn btn-danger btn-sm" data-act="delete-invoice" data-id="' + inv.id + '">Delete</button>' +
     '<div class="spacer"></div>' +
     (st !== "paid"
-      ? '<button class="btn" data-act="mark-paid" data-id="' + inv.id + '">Record payment</button>' : "") +
+      ? '<button class="btn" data-act="mark-paid" data-id="' + inv.id + '">Record payment</button>'
+      : '<button class="btn" data-act="mark-unpaid" data-id="' + inv.id +
+        '" title="Undo this and remove the payment recorded against it">Mark unpaid</button>') +
     '<button class="btn" data-act="save-invoice" data-id="' + inv.id + '" data-then="draft">Save &amp; draft email</button>' +
     '<button class="btn" data-act="save-invoice" data-id="' + inv.id + '" data-then="preview">Save &amp; view</button>' +
     '<button class="btn btn-primary" data-act="save-invoice" data-id="' + inv.id + '">Save</button>';
@@ -2052,11 +2059,65 @@ function saveInvoice(id, then) {
       recordPayment(inv, { date: todayISO(), amount: owed, method: "", notes: "" });
     }
   }
+
+  /* Picking a status other than paid while recorded payments still cover the total
+     used to save and then read as paid anyway, so the dropdown looked broken. Say
+     what is actually in the way and offer the one action that resolves it. */
+  if (v.status !== "paid" && invoicePaid(inv) >= invoiceTotals(inv).total - 0.005 &&
+      invoiceTotals(inv).total > 0) {
+    save();
+    closeModal();
+    markUnpaid(id);
+    return;
+  }
+
   save();
   closeModal();
   if (then === "preview") previewInvoice(id);
   else if (then === "draft") openGmailDraft(id);
   else render();
+}
+
+function linkedPayments(inv) {
+  return (DB.income || []).filter((i) => i.invoiceId === inv.id);
+}
+
+/* Un-marking an invoice as paid.
+
+   The status field alone never controlled this: an invoice also reads as paid when
+   the payments recorded against it cover the total. Marking one paid auto-logs a
+   payment for the balance, so setting the status back to "sent" left that payment
+   sitting there and invoiceStatus() immediately called it paid again — the change
+   looked like it simply didn't take.
+
+   The payments ARE the record of being paid, so undoing it removes them. Anything
+   else leaves the invoice saying unpaid while the money still counts as received. */
+function markUnpaid(id) {
+  const inv = invoiceById(id);
+  if (!inv) return;
+  const pays = linkedPayments(inv);
+
+  if (!pays.length) {
+    inv.status = inv.sentDate ? "sent" : "draft";
+    save();
+    render();
+    return;
+  }
+
+  const sum = pays.reduce((s, p) => s + num(p.amount), 0);
+  openModal("Mark " + esc(inv.number) + " as unpaid?",
+    "<p>This invoice has <strong>" + money(sum) + "</strong> recorded against it in " +
+    (pays.length === 1 ? "one payment" : pays.length + " payments") + ":</p>" +
+    '<ul style="margin:0 0 12px;padding-left:18px;font-size:13.5px">' +
+    pays.map((p) => "<li>" + esc(fmtDate(p.date)) + " — <strong>" + money(p.amount) + "</strong>" +
+      (p.method ? " · " + esc(p.method) : "") + "</li>").join("") + "</ul>" +
+    "<p>Marking it unpaid removes " + (pays.length === 1 ? "it" : "them") +
+    ", because that record is what makes the invoice paid. Leaving " +
+    (pays.length === 1 ? "it" : "them") + " in place would mean the invoice said unpaid " +
+    "while <strong>" + money(sum) + "</strong> still counted toward your income.</p>",
+    '<button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-danger" data-act="confirm-unpaid" data-id="' + inv.id + '">' +
+    "Remove and mark unpaid</button>");
 }
 
 function recordPayment(inv, p) {
@@ -3966,6 +4027,15 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "mark-paid": closeModal(); markPaidDialog(id); break;
+    case "mark-unpaid": closeModal(); markUnpaid(id); break;
+    case "confirm-unpaid": {
+      const inv = invoiceById(id);
+      if (!inv) break;
+      DB.income = (DB.income || []).filter((i) => i.invoiceId !== inv.id);
+      inv.status = inv.sentDate ? "sent" : "draft";
+      closeModal(); save(); render();
+      break;
+    }
     case "confirm-payment": {
       const inv = invoiceById(id);
       const v = formValues($("#pay-form"));
