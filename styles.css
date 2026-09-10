@@ -1871,3 +1871,61 @@ main > .section-head:first-child { margin-top: 4px; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ---------- Money: by month, awaiting payment, collected ----------
+   Shaped after Jay's Money tab: three small month cards showing made / owed /
+   projected, an owed table you can tick off, and everything collected below it. */
+
+.monthstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.mcard { padding: 13px 15px; }
+.mcard h3 { font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+.mline {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 2px 0;
+  color: var(--ink-2);
+}
+.mline b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.mline b.pos { color: var(--money-in); }
+.mline b.neg { color: var(--money-out); }
+.mline b.owed { color: var(--warn); }
+.mline.total {
+  border-top: 1px solid var(--border);
+  margin-top: 5px;
+  padding-top: 6px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tablewrap { overflow-x: auto; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Ticked off, but still on screen for a moment so it can be un-ticked. */
+tr.crossed td, tr.crossed td b { text-decoration: line-through; color: var(--ink-3); }
+tr.owedsub td {
+  text-align: right;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  border-bottom: none;
+  padding: 5px 12px;
+}
+tr.owedsub td.r { color: var(--warn); font-weight: 700; }
+tr.owedgrand td {
+  text-align: right;
+  font-weight: 800;
+  font-size: 15px;
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  padding: 9px 12px;
+}
+tr.owedgrand td.r { color: var(--warn); }
+td input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--money-in);
+  cursor: pointer;
+}
+tr.clickrow { cursor: pointer; }
+tr.clickrow:hover td { background: var(--surface-2); }
+td.muted { color: var(--ink-3); }

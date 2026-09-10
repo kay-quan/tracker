@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=46" }],
+  scripts: [{ getAttribute: () => "app.js?v=47" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -96,7 +96,8 @@ let app = read("app.js").replace(
   "  lineupRows, materialise, pitchUrl, outreachLineups, defaultData, withDefaults,\n" +
   "  draftEach, pickAllReachable, markDraftedSent, invoiceStatus, invoicePaid,\n" +
   "  linkedPayments, recordPayment, invoiceTotals, invoiceById,\n" +
-  "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS, paidByGig,\n" +
+  "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS,\n" +
+  "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -731,59 +732,94 @@ t("under-50K really is under 50K", () => {
   });
 });
 
-/* ================= what paid you ================= */
+/* ================= money: made, owed, projected ================= */
 
-t("payments group by the shoot they came from", () => {
-  const db = T.defaultData();
-  db.gigs = [{ id: "g1", title: "Koya — Academy LA", date: "2026-08-07", clientId: "c1", rate: 400 },
-             { id: "g2", title: "Hershe", date: "2026-08-20", clientId: "c1", rate: 250 }];
-  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
-  db.income = [
-    { id: "p1", amount: 200, gigId: "g1", date: "2026-08-10" },
-    { id: "p2", amount: 200, gigId: "g1", date: "2026-08-14" },
-    { id: "p3", amount: 250, gigId: "g2", date: "2026-08-25" },
+const moneyDB = () => {
+  const d = T.defaultData();
+  d.clients = [{ id: "c1", name: "Jay Matsumoto" }];
+  d.gigs = [
+    { id: "g1", title: "Koya — Academy LA", date: "2026-08-07", clientId: "c1", rateType: "flat", rate: 400 },
+    { id: "g2", title: "Hershe", date: "2026-08-20", clientId: "c1", rateType: "flat", rate: 250 },
+    { id: "g3", title: "Rate not agreed", date: "2026-08-28", clientId: "c1", rateType: "flat", rate: 0 },
+    { id: "g4", title: "Booked ahead", date: "2099-01-10", clientId: "c1", rateType: "flat", rate: 600 },
   ];
-  T.setDB(db);
-  const g = T.paidByGig(db.income);
-  eq(g.length, 2, "two shoots");
-  eq(g[0].label, "Koya — Academy LA", "biggest first");
-  eq(g[0].total, 400, "both payments summed");
-  eq(g[0].n, 2, "payment count");
-  eq(g[1].total, 250);
+  d.income = [];
+  return d;
+};
+
+t("a gig with no rate is TBD, not worth zero", () => {
+  const db = moneyDB(); T.setDB(db);
+  const g3 = db.gigs.find((g) => g.id === "g3");
+  eq(T.gigValue(g3), 0, "no rate set");
+  eq(T.gigIsPaid(g3), false, "must not count as paid just because it totals zero");
+  eq(T.gigOwed(g3), 0, "and nothing concrete is owed either");
+  eq(T.owedTotals(db.gigs).tbd, 1, "counted separately as TBD");
 });
 
-t("a payment with no shoot falls back to the client, then the source", () => {
-  const db = T.defaultData();
-  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
-  db.gigs = [];
-  db.income = [
-    { id: "p1", amount: 100, clientId: "c1", gigId: null, date: "2026-08-01" },
-    { id: "p2", amount: 75, clientId: "", gigId: null, source: "Print sales", date: "2026-08-02" },
-  ];
-  T.setDB(db);
-  const g = T.paidByGig(db.income);
-  eq(g.length, 2);
-  eq(g[0].label, "Jay Matsumoto", "client name used");
-  eq(g[0].gigId, null, "flagged as not tied to a shoot");
-  eq(g[1].label, "Print sales", "free-text source used");
+t("owed splits work already done from work booked ahead", () => {
+  const db = moneyDB(); T.setDB(db);
+  const o = T.owedTotals(db.gigs);
+  eq(o.work, 650, "Koya + Hershe are in the past");
+  eq(o.booked, 600, "the 2099 gig is not late, just booked");
+  eq(o.total, 1250);
 });
 
-t("a deleted gig doesn't make its payments vanish or splinter", () => {
-  const db = T.defaultData();
-  db.gigs = [];                                   // the gigs they referenced are gone
-  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
-  db.income = [
-    { id: "p1", amount: 300, gigId: "ghost-a", clientId: "c1", date: "2026-08-01" },
-    { id: "p2", amount: 200, gigId: "ghost-b", clientId: "c1", date: "2026-08-03" },
-  ];
+t("a part payment reduces what is owed without marking it paid", () => {
+  const db = moneyDB(); T.setDB(db);
+  db.income.push({ id: "p1", amount: 150, gigId: "g1", date: "2026-08-10" });
+  const g1 = db.gigs[0];
+  eq(T.gigPaid(g1), 150);
+  eq(T.gigOwed(g1), 250, "the rest is still owed");
+  eq(T.gigIsPaid(g1), false);
+  eq(T.owedTotals(db.gigs).work, 500, "owed total drops by what came in");
+});
+
+t("month cards report made, owed and projected", () => {
+  const db = moneyDB(); T.setDB(db);
+  db.income.push({ id: "p1", amount: 400, gigId: "g1", date: "2026-08-10" });
+  const m = T.moneyByMonth(db.gigs)["2026-08"];
+  eq(m.made, 400, "the paid gig");
+  eq(m.upcoming, 250, "the unpaid one");
+  eq(m.tbd, 1, "and the one with no rate");
+  eq(m.made + m.upcoming, 650, "projected");
+});
+
+t("ticking a gig paid logs a payment for exactly what is outstanding", () => {
+  const db = moneyDB(); T.setDB(db);
+  db.income.push({ id: "p1", amount: 100, gigId: "g1", date: "2026-08-10" });
+  T.toggleGigPaid("g1", true);
+  eq(db.income.length, 2, "one new payment");
+  const added = db.income.find((i) => i.id !== "p1");
+  eq(added.amount, 300, "the balance, not the whole fee again");
+  eq(added.gigId, "g1", "linked to the gig");
+  eq(T.gigIsPaid(db.gigs[0]), true);
+});
+
+t("un-ticking removes the payments and leaves other gigs alone", () => {
+  const db = moneyDB(); T.setDB(db);
+  db.income.push({ id: "keep", amount: 250, gigId: "g2", date: "2026-08-25" });
+  T.toggleGigPaid("g1", true);
+  T.toggleGigPaid("g1", false);
+  eq(T.gigPaid(db.gigs[0]), 0, "g1 cleared");
+  eq(T.gigIsPaid(db.gigs[0]), false);
+  eq(db.income.filter((i) => i.gigId === "g2").length, 1, "g2's payment untouched");
+});
+
+t("ticking an already-paid gig does not double-log", () => {
+  const db = moneyDB(); T.setDB(db);
+  T.toggleGigPaid("g1", true);
+  const n = db.income.length;
+  T.toggleGigPaid("g1", true);
+  eq(db.income.length, n, "nothing outstanding, so nothing added");
+});
+
+t("a cancelled gig is not money you are owed", () => {
+  const db = moneyDB(); T.setDB(db);
+  db.gigs.push({ id: "g5", title: "Called off", date: "2026-08-09", clientId: "c1",
+                 rateType: "flat", rate: 999, status: "cancelled" });
   T.setDB(db);
-  const g = T.paidByGig(db.income);
-  // Grouping on the dangling id would give two rows both labelled the same client,
-  // which reads as two shoots that no longer exist. They belong together.
-  eq(g.length, 1, "dangling ids must not each become their own row");
-  eq(g[0].total, 500, "both still counted");
-  eq(g[0].label, "Jay Matsumoto", "falls back rather than showing a blank row");
-  eq(g[0].gigId, null, "and is flagged as not tied to a shoot");
+  const live = db.gigs.filter((g) => (g.status || "") !== "cancelled");
+  eq(T.owedTotals(live).total, 1250, "the cancelled fee is excluded");
 });
 
 /* ---------- report ---------- */

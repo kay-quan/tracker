@@ -917,6 +917,96 @@ function paidByGig(rows) {
   return [...groups.values()].sort((a, b) => b.total - a.total);
 }
 
+/* ---------- the money side of a gig ----------
+   A gig is the unit here, the way it is in Jay's tracker: the question "what am I
+   owed" is asked about shoots, not about invoices, because plenty of work gets paid
+   without one ever being raised.
+
+   A gig with no rate set is not worth zero, it is worth "not agreed yet" — counted
+   separately as TBD rather than quietly dragging a month's projection down. */
+
+function gigPaid(g) {
+  return (DB.income || []).filter((i) => i.gigId === g.id)
+    .reduce((s, i) => s + num(i.amount), 0);
+}
+
+function gigOwed(g) {
+  const v = gigValue(g);
+  return v > 0 ? Math.max(0, v - gigPaid(g)) : 0;
+}
+
+function gigIsPaid(g) {
+  const v = gigValue(g);
+  return v > 0 && gigPaid(g) >= v - 0.005;
+}
+
+function gigMonth(g) { return (g.date || "").slice(0, 7); }
+
+/* Made / owed / projected, per month. Mirrors Jay's month cards. */
+function moneyByMonth(gigs) {
+  const map = {};
+  const bucket = (k) => (map[k] = map[k] || { made: 0, upcoming: 0, tbd: 0 });
+
+  /* "Made (net)" has to mean net, so it is money actually received that month less
+     what was spent that month. Taking it from gig fees instead would report a month
+     as better than it was. */
+  (DB.income || []).forEach((i) => {
+    const k = (i.date || "").slice(0, 7);
+    if (k) bucket(k).made += num(i.amount);
+  });
+  (DB.expenses || []).forEach((e) => {
+    const k = (e.date || "").slice(0, 7);
+    if (k) bucket(k).made -= num(e.amount);
+  });
+
+  // Owed is about the shoot's own month: work done in August is August's money.
+  gigs.forEach((g) => {
+    const k = gigMonth(g);
+    if (!k) return;
+    const b = bucket(k);
+    if (gigIsPaid(g)) return;              // already counted where the money landed
+    if (gigValue(g) > 0) b.upcoming += gigOwed(g);
+    else b.tbd++;
+  });
+  return map;
+}
+
+/* Work already done and not paid for is a different thing from work booked for next
+   month. Both are owed; only one is late. */
+function owedTotals(rows) {
+  const today = todayISO();
+  let work = 0, booked = 0, tbd = 0;
+  rows.forEach((g) => {
+    if (gigIsPaid(g)) return;
+    if (gigValue(g) > 0) {
+      const past = g.date ? g.date <= today : true;
+      if (past) work += gigOwed(g); else booked += gigOwed(g);
+    } else tbd++;
+  });
+  return { work: work, booked: booked, tbd: tbd, total: work + booked };
+}
+
+/* The checkbox in the owed table. Ticking it logs a payment for what is outstanding;
+   unticking removes the payments logged against that gig, the same way marking an
+   invoice unpaid does — the payment record IS the fact of being paid. */
+function toggleGigPaid(id, checked) {
+  const g = (DB.gigs || []).find((x) => x.id === id);
+  if (!g) return;
+  if (checked) {
+    const owed = gigOwed(g);
+    if (owed <= 0) return;
+    DB.income.push({
+      id: uid(), date: todayISO(), amount: owed,
+      clientId: g.clientId || "", gigId: g.id, invoiceId: null,
+      source: g.title || "Gig", method: "", category: "Client work", notes: "",
+    });
+  } else {
+    DB.income = (DB.income || []).filter((i) => i.gigId !== g.id);
+  }
+  save();
+  render();
+}
+
 function stat(label, value, sub, cls) {
   return '<div class="stat"><div class="label">' + esc(label) + "</div>" +
     '<div class="value ' + (cls || "") + '">' + value + "</div>" +
@@ -1155,73 +1245,93 @@ VIEWS.money = function () {
     '<button class="btn" data-act="goto" data-view="income">Payments received</button>' +
     '<button class="btn" data-act="goto" data-view="expenses">All expenses</button></div>';
 
-  html += '<h2 class="section-head">By month</h2>';
-  const y = f.year;
-  const now = new Date();
-  const months = [];
-  for (let m = 0; m < 12; m++) {
-    const key = y + "-" + String(m + 1).padStart(2, "0");
-    const made = DB.income.filter((i) => (i.date || "").slice(0, 7) === key)
-      .reduce((s, i) => s + num(i.amount), 0);
-    const spent = DB.expenses.filter((e) => (e.date || "").slice(0, 7) === key)
-      .reduce((s, e) => s + num(e.amount), 0);
-    // Money already booked for that month but not yet in the bank.
-    const owed = DB.gigs.filter((g) => (g.date || "").slice(0, 7) === key &&
-      ["confirmed", "completed"].includes(g.status) && !g.invoiceId)
-      .reduce((s, g) => s + gigValue(g), 0) +
-      DB.invoices.filter((inv) => (inv.issueDate || "").slice(0, 7) === key &&
-        !["paid", "draft"].includes(invoiceStatus(inv)))
-        .reduce((s, inv) => s + (invoiceTotals(inv).total - invoicePaid(inv)), 0);
-    if (made || spent || owed || m === now.getMonth()) months.push({ m, key, made, spent, owed });
-  }
-  if (!months.length) {
-    html += '<div class="card empty"><h3>Nothing logged yet</h3>' +
-      "<p>Record a payment or an expense and the months fill in.</p></div>";
-  } else {
-    months.reverse().forEach((x) => {
-      const label = new Date(y, x.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-      html += '<div class="card card-pad month"><div class="month-name">' + esc(label) + "</div>" +
-        row("Made (net)", money(x.made - x.spent), x.made - x.spent > 0 ? "green" : "") +
-        row("Upcoming / owed", money(x.owed), x.owed > 0 ? "amber" : "") +
-        '<div class="month-total"><span>Projected</span><span>' + money(x.made - x.spent + x.owed) + "</span></div>" +
-        "</div>";
-    });
+  /* ---- By month: made, owed, projected ---- */
+  const gigs = (DB.gigs || []).filter((g) => (g.status || "") !== "cancelled");
+  const mm = moneyByMonth(gigs);
+  const mkeys = Object.keys(mm).sort();
+  if (mkeys.length) {
+    html += '<h2 class="section-head">By month</h2>';
+    html += '<div class="monthstrip">' + mkeys.map((k) => {
+      const m = mm[k];
+      return '<div class="card mcard"><h3>' + esc(monthLabelOf(k)) + "</h3>" +
+        '<div class="mline">Made (net)<b class="' + (m.made < 0 ? "neg" : "pos") + '">' +
+        money(m.made) + "</b></div>" +
+        '<div class="mline">Upcoming / owed<b class="owed">' + money(m.upcoming) +
+        (m.tbd ? " +" + m.tbd + " TBD" : "") + "</b></div>" +
+        '<div class="mline total">Projected<b>' + money(m.made + m.upcoming) + "</b></div></div>";
+    }).join("") + "</div>";
   }
 
-  /* What paid you. The question the Money tab was not answering.
-     Scoped to the same calendar year as the figures above it, so the totals here
-     and the headline number are talking about the same period. */
-  const yr = { from: f.year + "-01-01", to: f.year + "-12-31" };
-  const paidRows = DB.income.filter((i) => inRange(i.date, yr));
-  html += '<h2 class="section-head">What paid you' +
-    (paidRows.length ? ' <span class="count">' + paidRows.length + "</span>" : "") +
-    '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button></h2>';
-  if (!paidRows.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
-      "Nothing received in " + f.year + ". Log a payment and it shows up here, " +
-      "grouped by the shoot it came from.</p></div>";
+  /* ---- Awaiting payment ---- */
+  const owedRows = gigs
+    .filter((g) => !gigIsPaid(g) || gigPaid(g) > 0)
+    .filter((g) => !gigIsPaid(g) || (g.date || "") >= addDays(todayISO(), -30))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const ot = owedTotals(owedRows);
+
+  html += '<h2 class="section-head">Awaiting payment' +
+    (ot.total ? ' <span class="count">' + money(ot.total) + "</span>" : "") + "</h2>";
+  html += '<div class="card tablewrap"><table><thead><tr><th></th><th>Client</th>' +
+    "<th>Gig</th><th>Date</th><th class=\"r\">Amount</th></tr></thead><tbody>";
+  if (!owedRows.length) {
+    html += '<tr><td colspan="5" class="muted">All caught up — nothing owed.</td></tr>';
   } else {
-    const groups = paidByGig(paidRows);
-    const untied = groups.filter((g) => !g.gigId).length;
-    html += '<div class="card">' + groups.map((g) =>
-      '<div class="paidrow' + (g.gigId ? ' has-gig" data-act="edit-gig" data-id="' + g.gigId : "") +
-      '">' +
-      '<div class="paidrow-main"><div class="paidrow-name">' + esc(g.label) +
-      (g.n > 1 ? ' <span class="chip">' + g.n + " payments</span>" : "") + "</div>" +
-      (g.sub ? '<div class="paidrow-sub">' + esc(g.sub) + "</div>" : "") + "</div>" +
-      '<div class="paidrow-amt">' + money(g.total) + "</div></div>").join("") + "</div>";
-    if (untied) {
-      html += '<p class="muted" style="font-size:12.5px;margin:6px 0 0">' + untied +
-        (untied === 1 ? " payment isn't" : " payments aren't") +
-        " tied to a shoot yet — open one and pick which shoot it was for.</p>";
+    html += owedRows.map((g) => {
+      const paid = gigIsPaid(g);
+      return "<tr" + (paid ? ' class="crossed"' : "") + ">" +
+        '<td><input type="checkbox" data-act="toggle-gig-paid" data-id="' + esc(g.id) + '"' +
+        (paid ? " checked" : "") + ' title="Paid?"></td>' +
+        "<td><b>" + esc(clientName(g.clientId)) + "</b></td>" +
+        "<td>" + esc(g.title || "Untitled") +
+        (gigValue(g) > 0 ? "" : ' <span class="chip money">needs rate</span>') + "</td>" +
+        "<td>" + (g.date ? esc(fmtDate(g.date)) : "—") + "</td>" +
+        '<td class="r">' + (gigValue(g) > 0 ? money(paid ? gigValue(g) : gigOwed(g)) : "TBD") +
+        "</td></tr>";
+    }).join("");
+    html += '<tr class="owedsub"><td colspan="4">Owed for work done</td>' +
+      '<td class="r">' + money(ot.work) + "</td></tr>";
+    if (ot.booked > 0) {
+      html += '<tr class="owedsub"><td colspan="4">Booked ahead (not done yet)</td>' +
+        '<td class="r">' + money(ot.booked) + "</td></tr>";
     }
+    html += '<tr class="owedgrand"><td colspan="4">Total' +
+      (ot.tbd ? ' <span class="chip money">+' + ot.tbd + " TBD</span>" : "") + "</td>" +
+      '<td class="r">' + money(ot.total) + "</td></tr>";
   }
+  html += "</tbody></table></div>";
+
+  /* ---- Collected ---- */
+  const yr = { from: f.year + "-01-01", to: f.year + "-12-31" };
+  const collected = DB.income.filter((i) => inRange(i.date, yr))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const collTotal = collected.reduce((s, i) => s + num(i.amount), 0);
+
+  html += '<h2 class="section-head">Collected' +
+    (collTotal ? ' <span class="count">' + money(collTotal) + "</span>" : "") +
+    '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button></h2>';
+  html += '<div class="card tablewrap"><table><thead><tr><th>Client</th><th>Gig</th>' +
+    "<th>Date</th><th>How</th><th class=\"r\">Amount</th></tr></thead><tbody>";
+  if (!collected.length) {
+    html += '<tr><td colspan="5" class="muted">Nothing collected in ' + f.year +
+      " yet. Tick a gig above as paid, or log a payment.</td></tr>";
+  } else {
+    html += collected.map((i) => {
+      const g = i.gigId ? (DB.gigs || []).find((x) => x.id === i.gigId) : null;
+      return '<tr data-act="edit-income" data-id="' + esc(i.id) + '" class="clickrow">' +
+        "<td><b>" + esc(i.clientId ? clientName(i.clientId) : (i.source || "—")) + "</b></td>" +
+        "<td>" + esc(g ? (g.title || "Untitled") : (i.gigId ? "—" : (i.clientId ? i.source || "—" : "—"))) + "</td>" +
+        "<td>" + (i.date ? esc(fmtDate(i.date)) : "—") + "</td>" +
+        "<td>" + esc(i.method || "—") + "</td>" +
+        '<td class="r"><b>' + money(i.amount) + "</b></td></tr>";
+    }).join("");
+  }
+  html += "</tbody></table></div>";
 
   html += '<h2 class="section-head">In vs. out</h2>' +
     '<div class="card card-pad">' + monthlyChart() + "</div>";
   html += '<h2 class="section-head">Where it went</h2>' +
     '<div class="card card-pad">' +
-    breakdown(groupSum(DB.expenses.filter((e) => (e.date || "").slice(0, 4) === String(y)),
+    breakdown(groupSum(DB.expenses.filter((e) => (e.date || "").slice(0, 4) === String(f.year)),
       (e) => e.category || "Uncategorised"), "var(--money-out)", "No expenses logged this year.") +
     "</div>";
   return html;
@@ -4317,6 +4427,7 @@ document.addEventListener("click", (e) => {
 
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
     case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
+    case "toggle-gig-paid": toggleGigPaid(id, el.checked); break;
     case "lineup-band":
       state.lineupBand = state.lineupBand || {};
       state.lineupBand[el.dataset.fest] = el.dataset.key;
