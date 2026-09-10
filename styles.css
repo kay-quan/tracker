@@ -2093,3 +2093,38 @@ td.muted { color: var(--ink-3); }
 .lineup.open > .lineup-head .agenda-caret { transform: rotate(90deg); }
 /* Buttons inside the heading act on their own, so they must not read as part of it. */
 .lineup-head .btn { cursor: pointer; }
+
+/* ---------- festival posters ----------
+   Small enough that seventeen headings can each carry one without the list turning
+   into a gallery. Click opens the full image. */
+
+.lineup-poster {
+  flex: none;
+  width: 34px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: zoom-in;
+  display: block;
+}
+/* The empty slot keeps the headings aligned whether or not a poster is on file. */
+.lineup-poster.add {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.lineup-head:hover .lineup-poster.add { opacity: 1; }
+.lineup-poster.add:hover { color: var(--accent); border-color: var(--accent); }
+.posterfull {
+  display: block;
+  max-width: 100%;
+  max-height: 72vh;
+  margin: 0 auto;
+  border-radius: 8px;
+}
