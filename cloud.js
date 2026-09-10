@@ -253,6 +253,18 @@ const Cloud = {
     });
 
     if (!writes.length) return true;          // nothing actually changed
+
+    /* A save that deletes a lot of records at once is almost never something you did
+       on purpose -- it is a stale tab, a half-loaded state, or something writing
+       fabricated data over the real thing. Refuse it and say so, rather than
+       quietly destroying the records. Recovery is far harder than a refused write. */
+    const deletes = writes.filter((w) => w.delete).length;
+    if (deletes >= 10 && deletes > Object.keys(next).length) {
+      throw new Error("Refused to save: this would delete " + deletes +
+        " records at once and leave only " + Object.keys(next).length +
+        ". Reload the page and try again — nothing has been changed.");
+    }
+
     await this._commit(writes);
     this.lastPush = next;
     return true;
