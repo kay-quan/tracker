@@ -406,7 +406,10 @@ const TABS = [
 // Badges flag only what needs a decision from you.
 function tabBadge(view) {
   const today = todayISO();
-  if (view === "today") return (DB.todos || []).filter((t) => !t.done).length;
+  /* No badge on Today. It counted open tasks, which for anyone actually using a
+     to-do list is never zero -- so it sat there permanently red and carried no
+     signal at all. The badges that remain flag something that needs a decision:
+     outreach that has gone quiet, and invoices unsent or overdue. */
   if (view === "outreach") {
     return (DB.outreach || []).filter((o) =>
       o.status === "to-contact" ||
