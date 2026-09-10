@@ -1386,7 +1386,8 @@ function monthGrid(paint, dayAct) {
     const iso = isoOf(cur);
     const other = cur.getMonth() !== mm - 1;
     const cls = "cal-day" + (other ? " other" : "") + (iso === today ? " today" : "") +
-      (dayAct === "local-day" && state.eventDay === iso ? " open" : "");
+      (dayAct === "local-day" && state.eventDay === iso ? " open" : "") +
+      (dayAct === "gig-day" && state.gigDay === iso ? " sel" : "");
     html += "<div class=\"" + cls + "\"" + (dayAct ? ' data-act="' + dayAct + '" data-date="' + iso + '"' : "") + ">" +
       '<div class="cal-date">' + cur.getDate() + "</div>" + paint(iso) + "</div>";
     cur.setDate(cur.getDate() + 1);
@@ -1403,33 +1404,118 @@ function gigsCalendar() {
   const byDate = {};
   DB.gigs.forEach((g) => { (byDate[g.date] = byDate[g.date] || []).push(g); });
 
-  const monthGigs = DB.gigs
-    .filter((g) => g.date && g.date.slice(0, 7) === state.calMonth && g.status !== "cancelled");
-  const monthValue = monthGigs.reduce((s, g) => s + gigValue(g), 0);
+  const live = DB.gigs.filter((g) => (g.status || "") !== "cancelled");
+  const monthGigs = live.filter((g) => (g.date || "").slice(0, 7) === state.calMonth)
+    .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+
+  /* A day has to be selected for the panel to have anything to say. Today, when
+     today is in the month being looked at; otherwise the first of it. */
+  if (!state.gigDay || state.gigDay.slice(0, 7) !== state.calMonth) {
+    const t = todayISO();
+    state.gigDay = t.slice(0, 7) === state.calMonth ? t : state.calMonth + "-01";
+  }
 
   let html =
-    '<div class="page-head"><div><h1>Calendar</h1>' +
-    "<p>Click any day to add a gig. " + monthGigs.length + " gig" + (monthGigs.length === 1 ? "" : "s") +
-    " this month, worth " + money(monthValue) + ".</p></div>" +
+    '<div class="page-head"><div><h1>Calendar</h1></div>' +
     '<div class="page-actions">' + calTabs() +
-    '<button class="btn btn-primary" data-act="new-gig">Add gig</button></div></div>';
+    '<button class="btn btn-primary" data-act="new-gig">＋ Add gig</button></div></div>';
 
   html += calNav(monthLabelOf(state.calMonth));
 
-  html += monthGrid((iso) => (byDate[iso] || []).map((g) => {
-    const label = (g.startTime ? fmtTime(g.startTime) + " " : "") + (g.title || "Gig");
-    return '<div class="cal-event ev-' + esc(g.status || "confirmed") + '" data-act="edit-gig" data-id="' +
-      g.id + '" title="' + esc((g.title || "Gig") + " \u2014 " + clientName(g.clientId) + " \u2014 " + money(gigValue(g))) + '">' +
-      esc(label) + "</div>";
-  }).join(""), "cal-day");
+  /* The month's money, for the month you are actually looking at rather than the
+     year — the calendar's whole job is answering "how is this month going". */
+  const mm = moneyByMonth(live)[state.calMonth] || { made: 0, upcoming: 0, tbd: 0 };
+  const shortMonth = monthLabelOf(state.calMonth).split(" ")[0];
+  html += '<div class="monthstrip">' +
+    '<div class="card stat made"><div class="lbl">Made · ' + esc(shortMonth) + "</div>" +
+    '<div class="val"' + (mm.made < 0 ? ' style="color:var(--money-out)"' : "") + ">" +
+    money(mm.made) + "</div>" +
+    '<div class="sub">net, collected' + (mm.made < 0 ? " — costs ahead of income" : "") + "</div></div>" +
+    '<div class="card stat upc"><div class="lbl">Upcoming</div>' +
+    '<div class="val">' + money(mm.upcoming) +
+    (mm.tbd ? ' <span style="font-size:12px">+' + mm.tbd + " TBD</span>" : "") + "</div>" +
+    '<div class="sub">billed / owed</div></div>' +
+    '<div class="card stat"><div class="lbl">Projected</div>' +
+    '<div class="val">' + money(mm.made + mm.upcoming) + "</div>" +
+    '<div class="sub">if all collected</div></div>' +
+    "</div>";
 
-  html += '<div class="legend">' +
-    '<span><i class="swatch" style="background:var(--money-in)"></i>Confirmed</span>' +
-    '<span><i class="swatch" style="background:var(--warn)"></i>Inquiry / tentative</span>' +
-    '<span><i class="swatch" style="background:var(--ink-3)"></i>Completed</span>' +
-    '<span><i class="swatch" style="background:var(--border-strong)"></i>Cancelled</span></div>';
+  /* Grid on the left, the month's gigs listed beside it. The list is what makes a
+     small calendar workable: the cells only have room for a name, so the money and
+     the running total live next to them rather than being crammed in. */
+  html += '<div class="calwrap"><div>';
+
+  html += monthGrid((iso) => {
+    const list = byDate[iso] || [];
+    return list.slice(0, 2).map((g) =>
+      '<div class="evchip' + (g.status === "cancelled" ? "" : " gig") +
+      '" data-act="edit-gig" data-id="' + esc(g.id) + '" title="' +
+      esc((g.title || "Gig") + " — " + clientName(g.clientId) + " — " + money(gigValue(g))) + '">' +
+      esc(g.title || "Gig") + "</div>").join("") +
+      (list.length > 2 ? '<div class="evmore">+' + (list.length - 2) + " more</div>" : "");
+  }, "gig-day");
+
+  html += gigDayPanel(byDate[state.gigDay] || []);
+  html += "</div>";
+
+  // ---- the month's gigs, as a ledger ----
+  let billed = 0, made = 0;
+  let led = '<aside class="card ledger"><h3>' + esc(monthLabelOf(state.calMonth)) + " — gigs</h3>";
+  if (!monthGigs.length) {
+    led += '<div class="ledgerempty">No gigs this month yet.</div>';
+  } else {
+    led += monthGigs.map((g) => {
+      const v = gigValue(g);
+      const paid = gigIsPaid(g);
+      if (v > 0) billed += v;
+      if (paid) made += v;
+      return '<div class="ledgerrow ' + (paid ? "pd" : "up") +
+        '" data-act="edit-gig" data-id="' + esc(g.id) + '">' +
+        '<span class="g">' + (g.date ? esc(String(Number(g.date.slice(8, 10)))) + " · " : "") +
+        esc(clientName(g.clientId) !== "—" ? clientName(g.clientId) : (g.title || "Gig")) + "</span>" +
+        '<span class="amt">' + (v > 0 ? money(v) : "TBD") + "</span></div>";
+    }).join("");
+  }
+  led += '<div class="ledgertot"><span>Billed</span><span>' + money(billed) + "</span></div>" +
+    '<div class="ledgertot grand"><span>Made (net)</span><span>' + money(made) + "</span></div>";
+  html += led + "</aside></div>";
 
   return html;
+}
+
+/* What is on the selected day, under the grid. */
+function gigDayPanel(list) {
+  const iso = state.gigDay;
+  const long = parseISO(iso).toLocaleDateString(undefined,
+    { weekday: "long", month: "long", day: "numeric" });
+
+  let html = '<div class="card daypanel gigday"><h3>' + esc(long) + "</h3>";
+  if (!list.length) {
+    html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing scheduled.</p>';
+  } else {
+    html += list.map((g) => {
+      const v = gigValue(g);
+      const paid = gigIsPaid(g);
+      return '<div class="evrow"><div class="evtime">' +
+        (g.startTime ? esc(fmtTime(g.startTime)) +
+          (g.endTime ? "–" + esc(fmtTime(g.endTime)) : "") : "all day") + "</div>" +
+        '<div class="evbody"><div class="evtitle">' + esc(g.title || "Gig") +
+        (v > 0
+          ? ' <span class="chip ' + (paid ? "good" : "money") + '">' +
+            (paid ? "paid · " : "") + money(v) + "</span>"
+          : ' <span class="chip money">needs rate</span>') + "</div>" +
+        (clientName(g.clientId) !== "—"
+          ? '<div class="evdetails">' + esc(clientName(g.clientId)) + "</div>" : "") +
+        (g.location ? '<div class="evdetails">' + esc(g.location) + "</div>" : "") +
+        "</div>" +
+        '<button class="iconbtn" data-act="edit-gig" data-id="' + esc(g.id) +
+        '" title="Edit">\u270e</button></div>';
+    }).join("");
+  }
+  html += '<div style="margin-top:10px">' +
+    '<button class="btn btn-sm" data-act="new-gig" data-date="' + esc(iso) +
+    '">＋ Add a gig on this day</button></div>';
+  return html + "</div>";
 }
 
 function eventsCalendar() {
@@ -4209,6 +4295,14 @@ document.addEventListener("click", (e) => {
   // an event inside it opens the event instead (handled by its own data-act).
   if (act === "backdrop") { if (e.target === el) closeModal(); return; }
   if (act === "cal-day") { if (e.target === el || e.target.classList.contains("cal-date")) newGigOn(el.dataset.date); return; }
+  if (act === "gig-day") {
+    // Clicking a gig chip opens that gig; clicking the day selects it.
+    if (e.target === el || e.target.classList.contains("cal-date")) {
+      state.gigDay = el.dataset.date;
+      render();
+    }
+    return;
+  }
   if (act === "local-day") {
     // Clicking a show inside the cell opens that show; clicking the day itself
     // opens the day. Toggling on the same day closes it again.
@@ -4247,7 +4341,13 @@ document.addEventListener("click", (e) => {
       render(); break;
     }
 
-    case "new-gig": gigForm(null); break;
+    case "new-gig": {
+      gigForm(null);
+      // Adding from an open day should already know which day that is.
+      const d = el.dataset.date;
+      if (d) { const f = $("#gig-form"); if (f && f.date) f.date.value = d; }
+      break;
+    }
     case "edit-gig": gigForm(gigById(id)); break;
     case "save-gig": saveGig(id || null); break;
     case "delete-gig":
