@@ -1929,3 +1929,85 @@ td input[type="checkbox"] {
 tr.clickrow { cursor: pointer; }
 tr.clickrow:hover td { background: var(--surface-2); }
 td.muted { color: var(--ink-3); }
+
+/* ---------- Calendar, in Jay's shape ----------
+   A compact month beside the month's gigs. The cells only have room for a name,
+   so the money and the running total live in the list next to them rather than
+   being crammed into a 74px box. */
+
+.calwrap { display: grid; grid-template-columns: minmax(0, 1fr) 264px; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .calwrap { grid-template-columns: minmax(0, 1fr); } }
+
+/* Stat cards over the calendar */
+.stat { padding: 12px 14px; }
+.stat .lbl {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.stat .val {
+  font-size: 21px; font-weight: 800; letter-spacing: -0.01em;
+  margin-top: 2px; font-variant-numeric: tabular-nums;
+}
+.stat .sub { font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+.stat.made .val { color: var(--money-in); }
+.stat.upc .val { color: var(--warn); }
+
+/* Day chips */
+.evchip {
+  font-size: 10.5px; font-weight: 600; line-height: 1.25;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--pers-soft); color: var(--pers);
+  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.evchip.gig { background: var(--money-in-soft); color: var(--money-in); }
+.evmore { font-size: 10px; color: var(--ink-3); margin-top: 1px; }
+
+/* The month's gigs, beside the grid */
+.ledger { padding: 12px 14px; }
+.ledger h3 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 6px;
+}
+.ledgerrow {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12.5px; padding: 4px 0;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.ledgerrow:hover { background: var(--surface-2); }
+.ledgerrow .g {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--ink-2);
+}
+.ledgerrow .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ledgerrow.up .amt { color: var(--warn); }
+.ledgerrow.pd .amt { color: var(--money-in); }
+.ledgerrow.pd .g::before { content: "✓ "; color: var(--money-in); }
+.ledgerempty { color: var(--ink-3); font-size: 12.5px; padding: 6px 0; }
+.ledgertot {
+  display: flex; justify-content: space-between;
+  font-size: 12.5px; padding: 5px 0 0; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.ledgertot.grand {
+  font-weight: 800; font-size: 14px; color: var(--ink);
+  border-top: 2px solid var(--border); margin-top: 5px; padding-top: 7px;
+}
+
+/* The selected day, under the grid */
+.daypanel.gigday { margin-top: 10px; }
+.daypanel.gigday h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
+.evrow { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.evrow:last-of-type { border-bottom: 0; }
+.evtime { flex: 0 0 74px; font-size: 12.5px; color: var(--ink-2); font-weight: 600; padding-top: 1px; }
+.evbody { flex: 1; min-width: 0; }
+.evtitle { font-weight: 600; font-size: 14px; }
+.evdetails { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+.iconbtn {
+  border: 0; background: none; cursor: pointer; color: var(--ink-3);
+  font-size: 14px; padding: 2px 6px; border-radius: 6px; flex: none;
+}
+.iconbtn:hover { color: var(--ink); background: var(--surface-2); }
+
+/* The selected cell */
+.cal-day.sel { background: var(--accent-soft); border-color: var(--accent); }
