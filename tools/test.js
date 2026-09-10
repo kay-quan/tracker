@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=45" }],
+  scripts: [{ getAttribute: () => "app.js?v=46" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -96,6 +96,7 @@ let app = read("app.js").replace(
   "  lineupRows, materialise, pitchUrl, outreachLineups, defaultData, withDefaults,\n" +
   "  draftEach, pickAllReachable, markDraftedSent, invoiceStatus, invoicePaid,\n" +
   "  linkedPayments, recordPayment, invoiceTotals, invoiceById,\n" +
+  "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS, paidByGig,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -671,6 +672,118 @@ t("standalone income needs no invoice and never touches one", () => {
   eq(T.invoicePaid(inv), 0, "unlinked money must not pay an invoice off");
   eq(T.invoiceStatus(inv), "sent", "invoice untouched");
   eq(db.income.filter((i) => !i.invoiceId).length, 1, "logged on its own");
+});
+
+/* ================= follower bands ================= */
+
+t("follower counts come from the database, and missing means missing", () => {
+  const withCount = Object.keys(A).find((k) => !A[k].alias && typeof A[k].fo === "number");
+  const without = Object.keys(A).find((k) => !A[k].alias && A[k].fo === undefined);
+  eq(T.followersOf(A[withCount].n), A[withCount].fo, "reads the stored count");
+  eq(T.followersOf(without ? A[without].n : "Nobody At All"), null, "never guesses one");
+  eq(T.followersOf("An Act That Does Not Exist"), null, "unknown act");
+});
+
+t("instagram is reduced to a handle, never rebuilt from a name", () => {
+  const k = Object.keys(A).find((x) => !A[x].alias && A[x].ig);
+  const h = T.instagramOf(A[k].n);
+  if (!h) throw new Error("no handle extracted");
+  if (h.indexOf("/") >= 0 || h.indexOf("http") === 0) throw new Error("URL leaked into the handle: " + h);
+  if (A[k].ig.indexOf(h) < 0) throw new Error("handle isn't in the stored URL");
+  eq(T.instagramOf("An Act That Does Not Exist"), "", "no handle invented");
+});
+
+t("follower counts format compactly", () => {
+  eq(T.fmtFollowers(950), "950");
+  eq(T.fmtFollowers(1300), "1.3K");
+  eq(T.fmtFollowers(12000), "12K");
+  eq(T.fmtFollowers(2400000), "2.4M");
+  eq(T.fmtFollowers(null), "");
+});
+
+t("bands split the acts without gaps or overlap", () => {
+  const real = Object.keys(A).filter((k) => !A[k].alias);
+  const counted = {};
+  T.FOLLOWER_BANDS.forEach((b) => { counted[b.key] = 0; });
+  real.forEach((k) => {
+    const hits = T.FOLLOWER_BANDS.filter((b) => T.inBand(A[k].n, b.key));
+    if (hits.length !== 1) {
+      throw new Error(A[k].n + " (" + A[k].fo + ") matched " + hits.length + " bands");
+    }
+    counted[hits[0].key]++;
+  });
+  const sum = Object.values(counted).reduce((a, b) => a + b, 0);
+  eq(sum, real.length, "every act lands in exactly one band");
+});
+
+t("'any' shows everything, including acts with no count", () => {
+  const real = Object.keys(A).filter((k) => !A[k].alias);
+  eq(real.every((k) => T.inBand(A[k].n, "all")), true);
+});
+
+t("under-50K really is under 50K", () => {
+  Object.keys(A).forEach((k) => {
+    if (A[k].alias) return;
+    if (T.inBand(A[k].n, "u50")) {
+      const f = A[k].fo;
+      if (!(f >= 10000 && f < 50000)) throw new Error(A[k].n + " has " + f + " in the 10K-50K band");
+    }
+  });
+});
+
+/* ================= what paid you ================= */
+
+t("payments group by the shoot they came from", () => {
+  const db = T.defaultData();
+  db.gigs = [{ id: "g1", title: "Koya — Academy LA", date: "2026-08-07", clientId: "c1", rate: 400 },
+             { id: "g2", title: "Hershe", date: "2026-08-20", clientId: "c1", rate: 250 }];
+  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
+  db.income = [
+    { id: "p1", amount: 200, gigId: "g1", date: "2026-08-10" },
+    { id: "p2", amount: 200, gigId: "g1", date: "2026-08-14" },
+    { id: "p3", amount: 250, gigId: "g2", date: "2026-08-25" },
+  ];
+  T.setDB(db);
+  const g = T.paidByGig(db.income);
+  eq(g.length, 2, "two shoots");
+  eq(g[0].label, "Koya — Academy LA", "biggest first");
+  eq(g[0].total, 400, "both payments summed");
+  eq(g[0].n, 2, "payment count");
+  eq(g[1].total, 250);
+});
+
+t("a payment with no shoot falls back to the client, then the source", () => {
+  const db = T.defaultData();
+  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
+  db.gigs = [];
+  db.income = [
+    { id: "p1", amount: 100, clientId: "c1", gigId: null, date: "2026-08-01" },
+    { id: "p2", amount: 75, clientId: "", gigId: null, source: "Print sales", date: "2026-08-02" },
+  ];
+  T.setDB(db);
+  const g = T.paidByGig(db.income);
+  eq(g.length, 2);
+  eq(g[0].label, "Jay Matsumoto", "client name used");
+  eq(g[0].gigId, null, "flagged as not tied to a shoot");
+  eq(g[1].label, "Print sales", "free-text source used");
+});
+
+t("a deleted gig doesn't make its payments vanish or splinter", () => {
+  const db = T.defaultData();
+  db.gigs = [];                                   // the gigs they referenced are gone
+  db.clients = [{ id: "c1", name: "Jay Matsumoto" }];
+  db.income = [
+    { id: "p1", amount: 300, gigId: "ghost-a", clientId: "c1", date: "2026-08-01" },
+    { id: "p2", amount: 200, gigId: "ghost-b", clientId: "c1", date: "2026-08-03" },
+  ];
+  T.setDB(db);
+  const g = T.paidByGig(db.income);
+  // Grouping on the dangling id would give two rows both labelled the same client,
+  // which reads as two shoots that no longer exist. They belong together.
+  eq(g.length, 1, "dangling ids must not each become their own row");
+  eq(g[0].total, 500, "both still counted");
+  eq(g[0].label, "Jay Matsumoto", "falls back rather than showing a blank row");
+  eq(g[0].gigId, null, "and is flagged as not tied to a shoot");
 });
 
 /* ---------- report ---------- */
