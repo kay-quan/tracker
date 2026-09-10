@@ -470,6 +470,7 @@ function render() {
     window.scrollTo({ top: y });
   }
   if (VIEWS[state.view].after) VIEWS[state.view].after();
+  trimNotes();
 }
 
 function go(view) {
@@ -676,12 +677,53 @@ function dueTag(t) {
 }
 
 // One task, with everything it carries. Used in the list and in the Top 3.
+/* Notes are typed as free text but read as a list of facts. Two separators, because
+   both are natural to type: a new line, and an inline middot. Leading dashes or
+   bullets people add themselves are stripped so they don't double up. */
+function noteLines(t) {
+  return String(t.notes || "")
+    .split(/\n+|\s+\u00b7\s+/)
+    .map((l) => l.trim().replace(/^[-•*]\s*/, ""))
+    .filter(Boolean);
+}
+
+/* A note is where a booking link or a dropbox URL ends up. Make it clickable, and
+   shorten it on screen so one long URL can't push the rest of the note out of view. */
+function linkify(str) {
+  return esc(str).replace(/(https?:\/\/[^\s<]+)/g, (u) =>
+    '<a href="' + u + '" target="_blank" rel="noopener">' +
+    (u.length > 44 ? u.slice(0, 44) + "…" : u) + "</a>");
+}
+
+function notesHTML(t) {
+  const lines = noteLines(t);
+  if (!lines.length) return "";
+  const open = !!(state.openNotes && state.openNotes[t.id]);
+  /* Every bullet is always in the DOM; the clamp decides what is visible. That way
+     one long bullet takes the same three lines as five short ones. */
+  return '<ul class="tasknotes' + (open ? "" : " clamped") + '">' +
+    lines.map((l) => "<li>" + linkify(l) + "</li>").join("") + "</ul>" +
+    '<button class="notesmore" data-act="toggle-notes" data-id="' + t.id + '" hidden>' +
+    (open ? "Show less" : "Show more") + "</button>";
+}
+
+/* Only measuring can tell whether the clamp actually hid anything. Guessing from the
+   character count shows "Show more" under a one-line note and hides it under a note
+   that really is cut off. */
+function trimNotes() {
+  $$("#view .tasknotes").forEach((ul) => {
+    const btn = ul.nextElementSibling;
+    if (!btn || !btn.classList.contains("notesmore")) return;
+    const clipped = ul.classList.contains("clamped") && ul.scrollHeight > ul.clientHeight + 2;
+    btn.hidden = !(clipped || !ul.classList.contains("clamped"));
+  });
+}
+
 function taskRow(t, opts) {
   const o = opts || {};
   const meta = (t.category
     ? '<span class="chip ' + (CATEGORY_TONE[t.category] || "") + '">' + esc(t.category) + "</span>"
     : "") + dueTag(t);
-  const open = state.openNotes && state.openNotes[t.id];
   return '<div class="taskrow' + (t.done ? " done" : "") + '"' +
     (o.draggable ? ' draggable="true" data-todo-id="' + t.id + '"' : "") + ">" +
     (o.draggable ? '<span class="grip" aria-hidden="true">\u22ee\u22ee</span>' : "") +
@@ -690,11 +732,7 @@ function taskRow(t, opts) {
     '<div class="taskbody">' +
     '<div class="tasktitle">' + esc(t.text) + "</div>" +
     (meta ? '<div class="taskmeta">' + meta + "</div>" : "") +
-    (t.notes
-      ? '<div class="tasknotes' + (open ? " open" : "") + '">' + esc(t.notes) + "</div>" +
-        '<button class="notesmore" data-act="toggle-notes" data-id="' + t.id + '">' +
-        (open ? "Show less" : "Show more") + "</button>"
-      : "") +
+    notesHTML(t) +
     "</div>" +
     '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit">\u270e</button>' +
     (o.restore
@@ -1821,17 +1859,34 @@ function eventsAgenda(byDate) {
       "Nothing listed for " + esc(monthLabelOf(state.calMonth)) + ".</p></div>";
   }
   const today = todayISO();
-  return dates.map((d) => {
+  /* A month of LA listings runs to hundreds of rows, and scrolling all of it to reach
+     one Saturday is the wrong shape. Each day is a header you open; today starts open
+     so the list is useful the moment it loads, and opening one does not close the rest. */
+  const openDays = state.openAgenda || (state.openAgenda = {});
+  if (!Object.keys(openDays).length && dates.indexOf(today) >= 0) openDays[today] = true;
+
+  const total = dates.reduce((n, d) => n + byDate[d].length, 0);
+  let html = '<div class="agenda-tools">' +
+    '<span class="muted">' + total + " show" + (total === 1 ? "" : "s") +
+    " across " + dates.length + " day" + (dates.length === 1 ? "" : "s") + "</span>" +
+    '<button class="btn btn-sm" data-act="agenda-all" data-open="1">Expand all</button>' +
+    '<button class="btn btn-sm" data-act="agenda-all" data-open="">Collapse all</button></div>';
+
+  return html + dates.map((d) => {
     const list = byDate[d].slice().sort((a, b) => (b.festival ? 1 : 0) - (a.festival ? 1 : 0) ||
       (a.venue || "").localeCompare(b.venue || ""));
     const day = parseISO(d);
-    return '<div class="agenda-day">' +
-      '<div class="agenda-date' + (d === today ? " is-today" : "") + '">' +
+    const isOpen = !!openDays[d];
+    return '<div class="agenda-day' + (isOpen ? " open" : "") + '">' +
+      '<button class="agenda-date' + (d === today ? " is-today" : "") +
+      '" data-act="agenda-day" data-date="' + esc(d) + '" aria-expanded="' + isOpen + '">' +
+      '<span class="agenda-caret" aria-hidden="true">\u203a</span>' +
       '<span class="agenda-dow">' + esc(day.toLocaleDateString(undefined, { weekday: "short" })) + "</span>" +
       '<span class="agenda-num">' + esc(day.toLocaleDateString(undefined, { month: "short", day: "numeric" })) + "</span>" +
       (d === today ? '<span class="agenda-dow">today</span>' : "") +
-      '<span class="agenda-count">' + list.length + " show" + (list.length === 1 ? "" : "s") + "</span></div>" +
-      list.map((e) =>
+      '<span class="agenda-count">' + list.length + " show" + (list.length === 1 ? "" : "s") + "</span></button>" +
+      (isOpen ? "" : "<!--collapsed-->") +
+      (!isOpen ? "" : list.map((e) =>
         '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
         '" data-act="show-event" data-id="' +
         esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
@@ -1845,7 +1900,7 @@ function eventsAgenda(byDate) {
           if (e.ages) sub.push(esc(e.ages));
           return sub.length ? '<div class="agenda-name">' + sub.join(" \u00b7 ") + "</div>" : "";
         })() +
-        "</div></div>").join("") +
+        "</div></div>").join("")) +
       "</div>";
   }).join("");
 }
@@ -4664,6 +4719,26 @@ document.addEventListener("click", (e) => {
     case "event-kind": state.eventKind = el.dataset.key; render(); break;
     case "close-day": state.eventDay = null; render(); break;
     case "event-view": state.eventView = el.dataset.mode; render(); break;
+    case "agenda-day": {
+      state.openAgenda = state.openAgenda || {};
+      const d = el.dataset.date;
+      if (state.openAgenda[d]) delete state.openAgenda[d]; else state.openAgenda[d] = true;
+      render();
+      break;
+    }
+    case "agenda-all": {
+      state.openAgenda = {};
+      if (el.dataset.open) {
+        (DB.localEvents || []).forEach((e) => {
+          if ((e.date || "").slice(0, 7) === state.calMonth) state.openAgenda[e.date] = true;
+        });
+      } else {
+        // An empty map would re-open today on the next render; mark it deliberate.
+        state.openAgenda.__none = true;
+      }
+      render();
+      break;
+    }
     case "new-local-event": {
       localEventForm(null);
       // Adding from an open day should already know which day that is.
