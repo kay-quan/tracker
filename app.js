@@ -1314,9 +1314,20 @@ function eventsCalendar() {
     '" data-act="event-kind" data-key="' + k.key + '">' + esc(k.label) +
     '<span class="n">' + k.n + "</span></button>").join("") + "</div>";
 
+  /* Two views over the same shows, not both at once. The month grid used to print
+     every show of the month underneath it as well, so finding one night meant
+     scrolling past all thirty. The grid answers "what does the month look like";
+     the list answers "show me everything". Pick one. */
+  const view = state.eventView || "calendar";
+  const seg = (m, label) => '<button class="seg' + (view === m ? " active" : "") +
+    '" data-act="event-view" data-mode="' + m + '">' + label + "</button>";
+  html += '<div class="btn-row"><div class="segmented">' +
+    seg("calendar", "\u25a6 Calendar") + seg("list", "\u2630 List") + "</div></div>";
+
   html += calNav(monthLabelOf(state.calMonth));
 
-  if (isNarrow()) { return html + eventsAgenda(byDate); }
+  // A seven-column grid is unreadable on a phone, so there the list is the only view.
+  if (view === "list" || isNarrow()) { return html + eventsAgenda(byDate); }
 
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
@@ -1340,16 +1351,6 @@ function eventsCalendar() {
     '<span><i class="swatch" style="background:#c2557a"></i>Festival</span>' +
     '<span><i class="swatch" style="background:#b07d2b"></i>Added by you</span>' +
     '<span class="muted">Click a day to see what’s on, or a show for its details.</span></div>';
-
-  // The grid gives the shape of the month; this lists every show underneath in
-  // full, so nothing is hidden behind a "+2 more" or trimmed to fit a cell.
-  const monthCount = Object.keys(byDate)
-    .filter((d) => d.slice(0, 7) === state.calMonth)
-    .reduce((n, d) => n + byDate[d].length, 0);
-  html += '<h2 class="section-head">Day by day' +
-    (monthCount ? ' <span class="count">' + monthCount + " show" + (monthCount === 1 ? "" : "s") + "</span>" : "") +
-    "</h2>";
-  html += eventsAgenda(byDate);
 
   return html;
 }
@@ -1863,7 +1864,7 @@ VIEWS.invoices = function () {
           (g.client && g.client.email
             ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft email</button>'
             : '<button class="btn btn-sm" data-act="edit-client-of" data-id="' + first.id + '">Add an email</button>') +
-          '<button class="btn btn-sm" data-act="print-invoice" data-id="' + first.id + '">PDF</button>' +
+          '<button class="btn btn-sm" data-act="save-pdf" data-id="' + first.id + '">PDF</button>' +
           '<button class="btn btn-sm" data-act="mark-paid" data-id="' + first.id + '">Record payment</button>' +
           "</div>";
 
@@ -2192,8 +2193,116 @@ function previewInvoice(id) {
     '<div class="spacer"></div>' +
     '<button class="btn" data-act="draft-gmail" data-id="' + inv.id + '">Draft email</button>' +
     '<button class="btn" data-act="copy-email" data-id="' + inv.id + '">Copy text</button>' +
-    '<button class="btn btn-primary" data-act="print-invoice" data-id="' + inv.id + '">Save as PDF</button>',
+    '<button class="btn" data-act="print-invoice" data-id="' + inv.id +
+    '" title="Sharper text, but you pick Save as PDF in the dialog">Print</button>' +
+    '<button class="btn btn-primary" data-act="save-pdf" data-id="' + inv.id +
+    '">Download PDF</button>',
     { wide: true, noFocus: true });
+}
+
+/* ---------- turning an invoice into an actual PDF file ----------
+   window.print() gives crisp vector text, but it hands you a print dialog and you
+   still have to find "Save as PDF" in it. This produces the file directly.
+
+   The two libraries are pulled only when you first save one, so the app still loads
+   with no dependencies. If the network is down, printing still works. */
+
+const PDF_LIBS = [
+  "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+];
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if ([...document.scripts].some((s) => s.src === src)) return res();
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error("Couldn't load " + src.split("/").pop()));
+    document.head.appendChild(s);
+  });
+}
+
+async function pdfReady() {
+  for (const src of PDF_LIBS) await loadScript(src);
+  if (!window.html2canvas || !(window.jspdf && window.jspdf.jsPDF)) {
+    throw new Error("The PDF libraries didn't load.");
+  }
+}
+
+function invoiceFilename(inv) {
+  const c = clientById(inv.clientId);
+  return (inv.number + (c ? " " + c.name : "")).replace(/[\/\\:*?"<>|]/g, "-") + ".pdf";
+}
+
+/* Renders the invoice off-screen at a fixed A4 width so the PDF doesn't depend on
+   the size of the window it was made from, then fits it to the page. */
+async function invoiceBlob(inv) {
+  await pdfReady();
+  const A4W = 794;                     // A4 at 96dpi, the width the doc is laid out for
+
+  const holder = document.createElement("div");
+  holder.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:" + A4W + "px;background:#f2f2ec";
+  holder.innerHTML = invoiceHTML(inv, true);
+  document.body.appendChild(holder);
+
+  try {
+    // Wait for the signature image, or it lands in the PDF half-drawn.
+    await Promise.all([...holder.querySelectorAll("img")].map((img) =>
+      img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+
+    const canvas = await window.html2canvas(holder, {
+      scale: 2, backgroundColor: "#f2f2ec", useCORS: true, logging: false,
+    });
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const imgH = (canvas.height * pw) / canvas.width;
+    const img = canvas.toDataURL("image/jpeg", 0.94);
+
+    doc.addImage(img, "JPEG", 0, 0, pw, imgH);
+    // A long invoice runs past one page; keep adding pages shifted up by a page each.
+    for (let y = ph; y < imgH - 1; y += ph) {
+      doc.addPage();
+      doc.addImage(img, "JPEG", 0, -y, pw, imgH);
+    }
+    return doc.output("blob");
+  } finally {
+    holder.remove();
+  }
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function savePdf(id) {
+  const inv = invoiceById(id);
+  if (!inv) return;
+  setSaveState("Making the PDF…", "saving");
+  try {
+    saveBlob(await invoiceBlob(inv), invoiceFilename(inv));
+    setSaveState("PDF saved", "");
+    setTimeout(() => setSaveState("", ""), 1800);
+  } catch (err) {
+    setSaveState("", "");
+    openModal("Couldn't make the PDF",
+      "<p>" + esc(err.message) + "</p>" +
+      "<p class=\"muted\" style=\"font-size:13px\">Printing still works and gives " +
+      "sharper text — choose <strong>Save as PDF</strong> as the destination.</p>",
+      '<button class="btn" data-act="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" data-act="print-invoice" data-id="' + id + '">Print instead</button>');
+  }
 }
 
 function printInvoice(id) {
@@ -2249,8 +2358,31 @@ function openGmailDraft(id) {
       '<button class="btn btn-primary" data-act="edit-client-of" data-id="' + inv.id + '">Add an email</button>');
     return;
   }
+  /* Gmail's compose link takes to / subject / body and nothing else — there is no
+     parameter for an attachment, and there deliberately isn't one, or any page could
+     put a file on your outgoing mail. So the closest thing to attaching it is to have
+     the PDF already saved and waiting when the draft opens. */
   window.open(gmailComposeUrl(inv), "_blank", "noopener");
   render();
+
+  const name = invoiceFilename(inv);
+  invoiceBlob(inv).then((blob) => {
+    saveBlob(blob, name);
+    openModal("Draft opened — attach the PDF",
+      "<p>The draft is addressed to <strong>" + esc(c.email) + "</strong>, and " +
+      "<strong>" + esc(name) + "</strong> has been saved to your downloads.</p>" +
+      "<p>Drag it into the draft, or use Gmail's paperclip. Gmail doesn't let a link " +
+      "attach a file — that's a Gmail rule, not something I can work around.</p>",
+      '<button class="btn btn-primary" data-act="close-modal">Got it</button>',
+      { noFocus: true });
+  }).catch((err) => {
+    openModal("Draft opened, but the PDF didn't build",
+      "<p>The draft is addressed to <strong>" + esc(c.email) + "</strong>.</p>" +
+      "<p>" + esc(err.message) + "</p>",
+      '<button class="btn" data-act="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" data-act="print-invoice" data-id="' + inv.id +
+      '">Print it instead</button>', { noFocus: true });
+  });
 }
 
 function emailSubject(inv) {
@@ -3767,6 +3899,19 @@ document.addEventListener("click", (e) => {
       const d = el.dataset.date;
       state.eventDay = state.eventDay === d ? null : d;
       render();
+      /* The panel sits under a six-row grid, so on most screens it opens below the
+         fold and the click looks like it did nothing. Only scroll when it actually
+         isn't in view — otherwise the page lurches on every day you try. */
+      if (state.eventDay) {
+        const panel = $(".daypanel");
+        if (panel) {
+          const r = panel.getBoundingClientRect();
+          // Instant, not smooth: render() has just restored scroll position with an
+          // instant scrollTo, and an animation starting from there fights it. Smooth
+          // scrolling is also simply ignored in some environments.
+          if (r.bottom > window.innerHeight - 8) panel.scrollIntoView({ block: "nearest" });
+        }
+      }
     }
     return;
   }
@@ -3807,6 +3952,7 @@ document.addEventListener("click", (e) => {
     case "preview-invoice": closeModal(); previewInvoice(id); break;
     case "save-invoice": saveInvoice(id, el.dataset.then); break;
     case "print-invoice": printInvoice(id); break;
+    case "save-pdf": savePdf(id); break;
     case "draft-gmail": closeModal(); openGmailDraft(id); break;
     case "copy-email": copyEmail(id); break;
     case "mark-sent": {
@@ -3933,6 +4079,7 @@ document.addEventListener("click", (e) => {
     case "cal-mode": state.calMode = el.dataset.mode; render(); break;
     case "event-kind": state.eventKind = el.dataset.key; render(); break;
     case "close-day": state.eventDay = null; render(); break;
+    case "event-view": state.eventView = el.dataset.mode; render(); break;
     case "new-local-event": {
       localEventForm(null);
       // Adding from an open day should already know which day that is.
