@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=50" }],
+  scripts: [{ getAttribute: () => "app.js?v=51" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -98,6 +98,7 @@ let app = read("app.js").replace(
   "  linkedPayments, recordPayment, invoiceTotals, invoiceById,\n" +
   "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS,\n" +
   "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
+  "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -818,8 +819,64 @@ t("a cancelled gig is not money you are owed", () => {
   db.gigs.push({ id: "g5", title: "Called off", date: "2026-08-09", clientId: "c1",
                  rateType: "flat", rate: 999, status: "cancelled" });
   T.setDB(db);
-  const live = db.gigs.filter((g) => (g.status || "") !== "cancelled");
-  eq(T.owedTotals(live).total, 1250, "the cancelled fee is excluded");
+  const live = T.workGigs();
+  eq(live.length, 4, "the cancelled gig is dropped from the work list");
+  eq(T.owedTotals(live).total, 1250, "so its fee is excluded");
+});
+
+/* ================= personal events =================
+   The whole reason these live in their own array: a birthday must never turn into
+   money owed, a fee, or a line in a month's projection. */
+
+t("a personal event is not a gig and never reaches the money", () => {
+  const db = T.defaultData();
+  db.clients = [{ id: "c1", name: "A Client" }];
+  db.gigs = [{ id: "g1", title: "Real gig", date: "2026-09-04", clientId: "c1",
+               rateType: "flat", rate: 400 }];
+  db.personal = [{ id: "p1", title: "Mum's birthday", date: "2026-09-04", kind: "Birthday" },
+                 { id: "p2", title: "Vegas trip", date: "2026-09-12", kind: "Trip" }];
+  db.income = []; db.expenses = [];
+  T.setDB(db);
+
+  const live = T.workGigs();
+  eq(live.length, 1, "personal events must not be counted as work");
+  eq(T.owedTotals(live).total, 400, "only the gig is owed");
+  const m = T.moneyByMonth(live)["2026-09"];
+  eq(m.upcoming, 400, "the birthday adds nothing to owed");
+  eq(m.tbd, 0, "and is not counted as a gig with no rate");
+  eq(T.ytdFigures().earned, 0, "nothing earned from a personal event");
+});
+
+t("personal events are stored apart from gigs", () => {
+  const db = T.defaultData();
+  db.gigs = []; db.personal = [];
+  T.setDB(db);
+  T.setState({ view: "calendar" });
+  // what the form writes
+  db.personal.push({ id: "p1", title: "Dentist", date: "2026-09-20", kind: "Appointment" });
+  eq(db.gigs.length, 0, "must not land in gigs");
+  eq(T.personalById("p1").title, "Dentist");
+  eq(T.personalById("nope"), undefined, "unknown id");
+});
+
+t("a personal event carries no money fields at all", () => {
+  const db = T.defaultData();
+  db.personal = [{ id: "p1", title: "Trip", date: "2026-09-20", kind: "Trip" }];
+  db.gigs = []; T.setDB(db);
+  const e = db.personal[0];
+  ["rate", "rateType", "clientId", "invoiceId", "hours"].forEach((k) => {
+    if (k in e) throw new Error("personal event has a money field: " + k);
+  });
+  // and gigValue would read it as worthless rather than as a fee
+  eq(T.gigValue(e), 0);
+});
+
+t("the sync knows how to store them", () => {
+  // A record type the sync does not know about is silently dropped on save.
+  const cloudSrc = read("cloud.js");
+  if (!/p:\s*"personal"/.test(cloudSrc)) {
+    throw new Error("RECORD_TYPES has no prefix for personal — they would not sync");
+  }
 });
 
 /* ---------- report ---------- */

@@ -117,7 +117,7 @@ const Cloud = {
 
   // prefix -> the DB array it belongs to
   RECORD_TYPES: { g: "gigs", i: "invoices", n: "income", x: "expenses",
-                  c: "clients", o: "outreach", t: "todos" },
+                  c: "clients", o: "outreach", t: "todos", p: "personal" },
 
   legacyUrl() { return FIRESTORE + "/trackers/" + this.session.uid; },
   recCollUrl() { return FIRESTORE + "/trackers/" + this.session.uid + "/rec"; },

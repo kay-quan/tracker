@@ -2014,3 +2014,14 @@ td.muted { color: var(--ink-3); }
 
 /* The selected cell */
 .cal-day.sel { background: var(--accent-soft); border-color: var(--accent); }
+
+/* ---------- personal events on the work calendar ----------
+   A different colour, not a different shade of the same one: the whole point is
+   telling at a glance that something is not a paying job. */
+
+.evchip.pers { background: var(--pers-soft); color: var(--pers); }
+.chip.pers { background: var(--pers-soft); color: var(--pers); }
+.evrow.pers .evtitle { color: var(--ink); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot-gig { background: var(--money-in); }
+.dot-pers { background: var(--pers); }
