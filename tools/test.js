@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=47" }],
+  scripts: [{ getAttribute: () => "app.js?v=48" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
