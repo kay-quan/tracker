@@ -1319,7 +1319,10 @@ VIEWS.money = function () {
       const g = i.gigId ? (DB.gigs || []).find((x) => x.id === i.gigId) : null;
       return '<tr data-act="edit-income" data-id="' + esc(i.id) + '" class="clickrow">' +
         "<td><b>" + esc(i.clientId ? clientName(i.clientId) : (i.source || "—")) + "</b></td>" +
-        "<td>" + esc(g ? (g.title || "Untitled") : (i.gigId ? "—" : (i.clientId ? i.source || "—" : "—"))) + "</td>" +
+        /* What the money was for, in the order it is most likely to have been
+           written: the linked shoot, then the typed source, then the note - which
+           is where a description lands when the payment predates having a gig. */
+        "<td>" + esc(g ? (g.title || "Untitled") : (i.source || i.notes || "—")) + "</td>" +
         "<td>" + (i.date ? esc(fmtDate(i.date)) : "—") + "</td>" +
         "<td>" + esc(i.method || "—") + "</td>" +
         '<td class="r"><b>' + money(i.amount) + "</b></td></tr>";
