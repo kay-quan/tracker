@@ -1821,3 +1821,53 @@ main > .section-head:first-child { margin-top: 4px; }
 
 /* A touch device has no hover; tapping selects, which is the useful action there. */
 @media (hover: none) { .actcard { display: none; } }
+
+/* ---------- Outreach: follower size ----------
+   A second filter row that stacks with the email one, so "has an address AND
+   under 50K" is reachable in two clicks. */
+
+.fbar-2 { margin-top: 6px; }
+.fbar-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 700;
+  align-self: center;
+  margin-right: 2px;
+}
+/* On the chip: the count sits with the name, and a realistic door is tinted. */
+.pick-fo {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--ink-3);
+  vertical-align: middle;
+}
+.pick-fo.small { background: var(--money-in-soft); color: var(--money-in); }
+
+/* ---------- Money: what paid you ---------- */
+
+.paidrow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.paidrow:last-child { border-bottom: 0; }
+.paidrow.has-gig { cursor: pointer; }
+.paidrow.has-gig:hover { background: var(--surface-2); }
+.paidrow-main { min-width: 0; flex: 1; }
+.paidrow-name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.paidrow-sub { font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.paidrow-amt {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--money-in);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

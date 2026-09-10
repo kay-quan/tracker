@@ -887,6 +887,36 @@ function toggleTodo(id) {
   refreshTodoList();
 }
 
+/* What actually earned the money, rather than just that money arrived.
+   Payments group by the shoot they came from; anything not tied to one falls back
+   to the client, then to whatever source was typed in. */
+function paidByGig(rows) {
+  const groups = new Map();
+  rows.forEach((i) => {
+    const gig = i.gigId ? (DB.gigs || []).find((g) => g.id === i.gigId) : null;
+    const key = gig ? "g:" + gig.id
+      : i.clientId ? "c:" + i.clientId
+      : "s:" + (i.source || "Other");
+    if (!groups.has(key)) {
+      groups.set(key, {
+        label: gig ? (gig.title || "Untitled shoot")
+          : i.clientId ? clientName(i.clientId)
+          : (i.source || "Other"),
+        sub: gig ? (gig.date ? fmtDate(gig.date) : "") +
+              (gig.clientId ? (gig.date ? " · " : "") + clientName(gig.clientId) : "")
+          : i.clientId ? "no shoot linked" : "not a client",
+        gigId: gig ? gig.id : null,
+        total: 0, n: 0, last: "",
+      });
+    }
+    const g = groups.get(key);
+    g.total += num(i.amount);
+    g.n++;
+    if ((i.date || "") > g.last) g.last = i.date || "";
+  });
+  return [...groups.values()].sort((a, b) => b.total - a.total);
+}
+
 function stat(label, value, sub, cls) {
   return '<div class="stat"><div class="label">' + esc(label) + "</div>" +
     '<div class="value ' + (cls || "") + '">' + value + "</div>" +
@@ -1156,6 +1186,35 @@ VIEWS.money = function () {
         '<div class="month-total"><span>Projected</span><span>' + money(x.made - x.spent + x.owed) + "</span></div>" +
         "</div>";
     });
+  }
+
+  /* What paid you. The question the Money tab was not answering.
+     Scoped to the same calendar year as the figures above it, so the totals here
+     and the headline number are talking about the same period. */
+  const yr = { from: f.year + "-01-01", to: f.year + "-12-31" };
+  const paidRows = DB.income.filter((i) => inRange(i.date, yr));
+  html += '<h2 class="section-head">What paid you' +
+    (paidRows.length ? ' <span class="count">' + paidRows.length + "</span>" : "") +
+    '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button></h2>';
+  if (!paidRows.length) {
+    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+      "Nothing received in " + f.year + ". Log a payment and it shows up here, " +
+      "grouped by the shoot it came from.</p></div>";
+  } else {
+    const groups = paidByGig(paidRows);
+    const untied = groups.filter((g) => !g.gigId).length;
+    html += '<div class="card">' + groups.map((g) =>
+      '<div class="paidrow' + (g.gigId ? ' has-gig" data-act="edit-gig" data-id="' + g.gigId : "") +
+      '">' +
+      '<div class="paidrow-main"><div class="paidrow-name">' + esc(g.label) +
+      (g.n > 1 ? ' <span class="chip">' + g.n + " payments</span>" : "") + "</div>" +
+      (g.sub ? '<div class="paidrow-sub">' + esc(g.sub) + "</div>" : "") + "</div>" +
+      '<div class="paidrow-amt">' + money(g.total) + "</div></div>").join("") + "</div>";
+    if (untied) {
+      html += '<p class="muted" style="font-size:12.5px;margin:6px 0 0">' + untied +
+        (untied === 1 ? " payment isn't" : " payments aren't") +
+        " tied to a shoot yet — open one and pick which shoot it was for.</p>";
+    }
   }
 
   html += '<h2 class="section-head">In vs. out</h2>' +
@@ -2127,6 +2186,9 @@ function recordPayment(inv, p) {
     amount: num(p.amount),
     clientId: inv.clientId,
     invoiceId: inv.id,
+    // The invoice already knows which shoot it billed for; carry it through so the
+    // Money tab can say what earned the money, not just that money arrived.
+    gigId: (inv.gigIds && inv.gigIds[0]) || null,
     source: "Invoice " + inv.number,
     method: p.method || "",
     category: "Client work",
@@ -2541,8 +2603,22 @@ VIEWS.income = function () {
 };
 VIEWS.income.after = periodPickerAfter;
 
+/* Gigs newest first: a payment being logged is far more often for recent work
+   than for something from January. */
+function gigOptions(selected) {
+  const gigs = (DB.gigs || []).slice()
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return '<option value="">— Not tied to a shoot —</option>' + gigs.map((g) => {
+    const label = (g.date ? fmtDate(g.date) + " · " : "") + (g.title || "Untitled") +
+      (gigValue(g) ? " · " + money(gigValue(g)) : "");
+    return '<option value="' + esc(g.id) + '"' + (g.id === selected ? " selected" : "") +
+      ">" + esc(label) + "</option>";
+  }).join("");
+}
+
 function incomeForm(rec) {
-  const i = rec || { id: null, date: todayISO(), amount: "", clientId: "", source: "", method: "", notes: "", invoiceId: null };
+  const i = rec || { id: null, date: todayISO(), amount: "", clientId: "", source: "",
+                     method: "", notes: "", invoiceId: null, gigId: "" };
   const linked = i.invoiceId ? invoiceById(i.invoiceId) : null;
   const body =
     '<form id="income-form">' +
@@ -2552,6 +2628,10 @@ function incomeForm(rec) {
     '<div class="field"><label>Amount</label><input type="number" step="0.01" name="amount" value="' + esc(i.amount) + '" required></div>' +
     "</div>" +
     '<div class="field"><label>Client</label><select name="clientId">' + clientOptions(i.clientId) + "</select></div>" +
+    /* Which shoot this was for. Without it the Money tab can only say money came
+       in, not what earned it - which is the question actually being asked of it. */
+    '<div class="field"><label>Which shoot? <span class="hint">optional</span></label>' +
+    '<select name="gigId">' + gigOptions(i.gigId) + "</select></div>" +
     '<div class="field"><label>Or describe the source <span class="hint">if it wasn\'t a client</span></label>' +
     '<input name="source" value="' + esc(i.source) + '" placeholder="Print sales, licensing, workshop…"></div>' +
     '<div class="field"><label>How you were paid</label><select name="method">' +
@@ -2571,6 +2651,7 @@ function saveIncome(id) {
   const rec = existing || { id: uid(), invoiceId: null, category: "Client work" };
   Object.assign(rec, {
     date: v.date, amount: num(v.amount), clientId: v.clientId,
+    gigId: v.gigId || null,
     source: v.source.trim(), method: v.method, notes: v.notes.trim(),
   });
   if (!existing) DB.income.push(rec);
@@ -3015,6 +3096,48 @@ function materialise(r) {
   return real;
 }
 
+/* Follower bands. Jay's research is blunt about why this matters: above roughly
+   100K an act routes everything through a link-in-bio page and does not answer
+   mail, while the bottom of the bill does. So the useful question about a lineup
+   is not who is on it, it is who on it is a realistic door.
+
+   Counts are read off the profile once and stored; nothing here re-checks them.
+   Instagram rate-limits hard under parallel load - Jay got 227 unreadable out of
+   246 trying - so an act with no count on file says so rather than being guessed. */
+const FOLLOWER_BANDS = [
+  { key: "u10", label: "under 10K", lo: 0, hi: 10000 },
+  { key: "u50", label: "10K–50K", lo: 10000, hi: 50000 },
+  { key: "u250", label: "50K–250K", lo: 50000, hi: 250000 },
+  { key: "big", label: "250K+", lo: 250000, hi: Infinity },
+  { key: "none", label: "no count", lo: null, hi: null },
+];
+
+function followersOf(name) {
+  const rec = artistRec(name);
+  return rec && typeof rec.fo === "number" ? rec.fo : null;
+}
+
+function instagramOf(name) {
+  const rec = artistRec(name);
+  if (!rec || !rec.ig) return "";
+  return String(rec.ig).replace(/[?#].*$/, "").replace(/\/+$/, "").split("/").pop().replace(/^@/, "");
+}
+
+function fmtFollowers(n) {
+  if (n == null) return "";
+  if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K";
+  return String(n);
+}
+
+function inBand(name, key) {
+  if (!key || key === "all") return true;
+  const f = followersOf(name);
+  if (key === "none") return f == null;
+  const b = FOLLOWER_BANDS.find((x) => x.key === key);
+  return b && f != null && f >= b.lo && f < b.hi;
+}
+
 /* ---------- lineups: a card per festival, artists as pickable buttons ---------- */
 
 function outreachLineups(rows) {
@@ -3044,10 +3167,11 @@ function outreachLineups(rows) {
     const noEmail = list.filter((r) => !r.email);
     const contacted = list.filter((r) => r.status !== "to-contact");
     const filter = (state.lineupFilter || {})[fest] || "all";
-    const shown = filter === "email" ? withEmail
+    const band = (state.lineupBand || {})[fest] || "all";
+    const shown = (filter === "email" ? withEmail
       : filter === "noemail" ? noEmail
       : filter === "contacted" ? contacted
-      : list;
+      : list).filter((r) => inBand(r.venue, band));
     const pickedHere = list.filter((r) => sel[r.id]);
 
     html += '<div class="lineup">';
@@ -3077,6 +3201,19 @@ function outreachLineups(rows) {
       fb("contacted", "Contacted", contacted.length) +
       "</div>";
 
+    /* Second row, deliberately separate: it stacks with the row above rather than
+       replacing it, so "has an email AND under 50K" is one click from here. */
+    const bandBtn = (key, label) => {
+      const n = list.filter((r) => inBand(r.venue, key)).length;
+      return '<button class="fbtn' + (band === key ? " on" : "") +
+        '" data-act="lineup-band" data-fest="' + esc(fest) + '" data-key="' + key + '">' +
+        esc(label) + " <b>" + n + "</b></button>";
+    };
+    html += '<div class="fbar fbar-2"><span class="fbar-label">Followers</span>' +
+      bandBtn("all", "Any") +
+      FOLLOWER_BANDS.map((b) => bandBtn(b.key, b.label)).join("") +
+      "</div>";
+
     html += '<div class="legend legend-sm">' +
       '<span><i class="dot dot-new"></i>not contacted</span>' +
       '<span><i class="dot dot-draft"></i>drafted, not sent</span>' +
@@ -3091,10 +3228,16 @@ function outreachLineups(rows) {
         const cls = sel[r.id] ? "picked"
           : r.status !== "to-contact" ? "sent"
           : r.draftedAt ? "drafted" : "";
-        const sub = r.email ? esc(r.email) : "no email on file yet";
+        const ig = instagramOf(r.venue);
+        const sub = r.email ? esc(r.email)
+          : ig ? "@" + esc(ig) + " · no email yet"
+          : "no email on file yet";
+        const f = followersOf(r.venue);
         return '<button class="pick-act ' + cls + '" data-act="pick-act" data-id="' + r.id +
           '" data-act-name="' + esc(r.venue) + '">' +
-          '<span class="pick-name">' + esc(r.venue) + "</span>" +
+          '<span class="pick-name">' + esc(r.venue) +
+          (f != null ? '<span class="pick-fo' + (f < 50000 ? " small" : "") + '">' +
+            fmtFollowers(f) + "</span>" : "") + "</span>" +
           '<span class="pick-sub">' + sub + "</span></button>";
       }).join("") + "</div>";
     }
@@ -4174,6 +4317,11 @@ document.addEventListener("click", (e) => {
 
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
     case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
+    case "lineup-band":
+      state.lineupBand = state.lineupBand || {};
+      state.lineupBand[el.dataset.fest] = el.dataset.key;
+      render();
+      break;
     case "lineup-filter": {
       state.lineupFilter = state.lineupFilter || {};
       state.lineupFilter[el.dataset.fest] = el.dataset.key;
