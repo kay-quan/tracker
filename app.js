@@ -134,6 +134,9 @@ function defaultData() {
     },
     clients: [], gigs: [], invoices: [], income: [], expenses: [],
     outreach: [], todos: [], localEvents: [], localEventsFetchedAt: null,
+    // Personal things on the calendar. Deliberately NOT gigs: they have no client,
+    // no fee and no invoice, and they must never reach the money side.
+    personal: [],
   };
 }
 
@@ -925,6 +928,13 @@ function paidByGig(rows) {
    A gig with no rate set is not worth zero, it is worth "not agreed yet" — counted
    separately as TBD rather than quietly dragging a month's projection down. */
 
+/* The gigs that count as work. Personal events are a separate array and must never
+   be swept in here: they have no fee, so they would show up as gigs awaiting a rate
+   and drag every projection with them. Cancelled work is not money you are owed. */
+function workGigs() {
+  return (DB.gigs || []).filter((g) => (g.status || "") !== "cancelled");
+}
+
 function gigPaid(g) {
   return (DB.income || []).filter((i) => i.gigId === g.id)
     .reduce((s, i) => s + num(i.amount), 0);
@@ -1246,7 +1256,7 @@ VIEWS.money = function () {
     '<button class="btn" data-act="goto" data-view="expenses">All expenses</button></div>';
 
   /* ---- By month: made, owed, projected ---- */
-  const gigs = (DB.gigs || []).filter((g) => (g.status || "") !== "cancelled");
+  const gigs = workGigs();
   const mm = moneyByMonth(gigs);
   const mkeys = Object.keys(mm).sort();
   if (mkeys.length) {
@@ -1400,11 +1410,72 @@ function monthLabelOf(calMonth) {
   return new Date(yy, mm - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
+/* ---------- personal events ----------
+   Things in your own life that share the calendar with work: a birthday, a trip,
+   a doctor's appointment. They carry no client, no rate and no invoice, and they
+   are stored apart from gigs so they can never turn up in a fee total, an owed
+   figure or a month's projection. */
+
+const PERSONAL_KINDS = ["Personal", "Birthday", "Trip", "Appointment", "Family", "Other"];
+
+function personalById(id) { return (DB.personal || []).find((x) => x.id === id); }
+
+function personalForm(rec, presetDate) {
+  const e = rec || { id: null, title: "", date: presetDate || todayISO(), startTime: "",
+                     endTime: "", kind: "Personal", location: "", notes: "" };
+  const body =
+    '<form id="personal-form">' +
+    '<div class="field"><label>What is it?</label>' +
+    '<input name="title" value="' + esc(e.title) + '" required ' +
+    'placeholder="e.g. Mum\u2019s birthday, Vegas trip, dentist"></div>' +
+    '<div class="field-row">' +
+    '<div class="field"><label>Date</label><input type="date" name="date" value="' +
+    esc(e.date) + '" required></div>' +
+    '<div class="field"><label>Kind</label><select name="kind">' +
+    selectOptions(PERSONAL_KINDS, e.kind, "") + "</select></div></div>" +
+    '<div class="field-row">' +
+    '<div class="field"><label>Start <span class="hint">optional</span></label>' +
+    '<input type="time" name="startTime" value="' + esc(e.startTime) + '"></div>' +
+    '<div class="field"><label>End <span class="hint">optional</span></label>' +
+    '<input type="time" name="endTime" value="' + esc(e.endTime) + '"></div></div>' +
+    '<div class="field"><label>Where <span class="hint">optional</span></label>' +
+    '<input name="location" value="' + esc(e.location) + '"></div>' +
+    '<div class="field"><label>Notes <span class="hint">optional</span></label>' +
+    '<textarea name="notes">' + esc(e.notes) + "</textarea></div></form>";
+
+  openModal(e.id ? "Edit event" : "Add a personal event", body,
+    (e.id ? '<button class="btn btn-danger btn-sm" data-act="delete-personal" data-id="' +
+      e.id + '">Delete</button>' : "") +
+    '<div class="spacer"></div><button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="save-personal" data-id="' + (e.id || "") +
+    '">Save</button>');
+}
+
+function savePersonal(id) {
+  const v = formValues($("#personal-form"));
+  if (!v.title.trim() || !v.date) return;
+  const existing = id ? personalById(id) : null;
+  const rec = existing || { id: uid() };
+  Object.assign(rec, {
+    title: v.title.trim(), date: v.date, kind: v.kind || "Personal",
+    startTime: v.startTime, endTime: v.endTime,
+    location: v.location.trim(), notes: v.notes.trim(),
+  });
+  if (!existing) { DB.personal = DB.personal || []; DB.personal.push(rec); }
+  save();
+  closeModal();
+  render();
+}
+
 function gigsCalendar() {
   const byDate = {};
   DB.gigs.forEach((g) => { (byDate[g.date] = byDate[g.date] || []).push(g); });
+  // Personal events share the grid but are kept in their own bucket throughout,
+  // so nothing downstream can mistake one for billable work.
+  const persByDate = {};
+  (DB.personal || []).forEach((e) => { (persByDate[e.date] = persByDate[e.date] || []).push(e); });
 
-  const live = DB.gigs.filter((g) => (g.status || "") !== "cancelled");
+  const live = workGigs();
   const monthGigs = live.filter((g) => (g.date || "").slice(0, 7) === state.calMonth)
     .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
 
@@ -1418,6 +1489,7 @@ function gigsCalendar() {
   let html =
     '<div class="page-head"><div><h1>Calendar</h1></div>' +
     '<div class="page-actions">' + calTabs() +
+    '<button class="btn" data-act="new-personal">＋ Add event</button>' +
     '<button class="btn btn-primary" data-act="new-gig">＋ Add gig</button></div></div>';
 
   html += calNav(monthLabelOf(state.calMonth));
@@ -1447,15 +1519,26 @@ function gigsCalendar() {
 
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
-    return list.slice(0, 2).map((g) =>
+    const pers = persByDate[iso] || [];
+    // Work first, then personal, then a count of whatever didn't fit.
+    const room = Math.max(0, 3 - list.length);
+    const hidden = Math.max(0, list.length - 3) + Math.max(0, pers.length - room);
+    return list.slice(0, 3).map((g) =>
       '<div class="evchip' + (g.status === "cancelled" ? "" : " gig") +
       '" data-act="edit-gig" data-id="' + esc(g.id) + '" title="' +
       esc((g.title || "Gig") + " — " + clientName(g.clientId) + " — " + money(gigValue(g))) + '">' +
       esc(g.title || "Gig") + "</div>").join("") +
-      (list.length > 2 ? '<div class="evmore">+' + (list.length - 2) + " more</div>" : "");
+      pers.slice(0, room).map((e) =>
+        '<div class="evchip pers" data-act="edit-personal" data-id="' + esc(e.id) + '" title="' +
+        esc(e.title + (e.location ? " · " + e.location : "")) + '">' +
+        esc(e.title) + "</div>").join("") +
+      (hidden ? '<div class="evmore">+' + hidden + " more</div>" : "");
   }, "gig-day");
 
-  html += gigDayPanel(byDate[state.gigDay] || []);
+  html += gigDayPanel(byDate[state.gigDay] || [], persByDate[state.gigDay] || []);
+  html += '<div class="legend legend-sm">' +
+    '<span><i class="dot dot-gig"></i>work</span>' +
+    '<span><i class="dot dot-pers"></i>personal</span></div>';
   html += "</div>";
 
   // ---- the month's gigs, as a ledger ----
@@ -1483,14 +1566,24 @@ function gigsCalendar() {
   return html;
 }
 
-/* What is on the selected day, under the grid. */
-function gigDayPanel(list) {
+/* What is on the selected day, under the grid: work and personal together, because
+   that is how a day is actually lived, but visibly distinct. */
+function gigDayPanel(list, pers) {
   const iso = state.gigDay;
+  pers = pers || [];
   const long = parseISO(iso).toLocaleDateString(undefined,
     { weekday: "long", month: "long", day: "numeric" });
 
   let html = '<div class="card daypanel gigday"><h3>' + esc(long) + "</h3>";
-  if (!list.length) {
+
+  /* Said once, at the top. A gig and something personal on the same day is worth
+     noticing before you find out the hard way. */
+  if (list.length && pers.length) {
+    html += '<div class="daypanel-clash">Heads up — you have work and something ' +
+      "personal on this day.</div>";
+  }
+
+  if (!list.length && !pers.length) {
     html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing scheduled.</p>';
   } else {
     html += list.map((g) => {
@@ -1511,10 +1604,24 @@ function gigDayPanel(list) {
         '<button class="iconbtn" data-act="edit-gig" data-id="' + esc(g.id) +
         '" title="Edit">\u270e</button></div>';
     }).join("");
+
+    html += pers.map((e) =>
+      '<div class="evrow pers"><div class="evtime">' +
+      (e.startTime ? esc(fmtTime(e.startTime)) +
+        (e.endTime ? "–" + esc(fmtTime(e.endTime)) : "") : "all day") + "</div>" +
+      '<div class="evbody"><div class="evtitle">' + esc(e.title) +
+      ' <span class="chip pers">' + esc(e.kind || "Personal") + "</span></div>" +
+      (e.location ? '<div class="evdetails">' + esc(e.location) + "</div>" : "") +
+      (e.notes ? '<div class="evdetails">' + esc(e.notes) + "</div>" : "") +
+      "</div>" +
+      '<button class="iconbtn" data-act="edit-personal" data-id="' + esc(e.id) +
+      '" title="Edit">\u270e</button></div>').join("");
   }
-  html += '<div style="margin-top:10px">' +
+  html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn btn-sm" data-act="new-gig" data-date="' + esc(iso) +
-    '">＋ Add a gig on this day</button></div>';
+    '">＋ Gig</button>' +
+    '<button class="btn btn-sm" data-act="new-personal" data-date="' + esc(iso) +
+    '">＋ Personal event</button></div>';
   return html + "</div>";
 }
 
@@ -4341,6 +4448,15 @@ document.addEventListener("click", (e) => {
       render(); break;
     }
 
+    case "new-personal": personalForm(null, el.dataset.date || state.gigDay); break;
+    case "edit-personal": personalForm(personalById(id)); break;
+    case "save-personal": savePersonal(id || null); break;
+    case "delete-personal":
+      confirmDelete("this event", () => {
+        DB.personal = (DB.personal || []).filter((x) => x.id !== id);
+        save(); closeModal(); render();
+      });
+      break;
     case "new-gig": {
       gigForm(null);
       // Adding from an open day should already know which day that is.
