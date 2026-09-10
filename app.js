@@ -3563,7 +3563,15 @@ function outreachLineups(rows) {
   }
 
   const sel = state.picked || {};
-  let html = "";
+  /* Seventeen lineups, one of them 208 acts long, is a lot of page to scroll past to
+     reach the festival you care about. Each card collapses to its heading, which
+     already carries the two numbers that matter: how many acts, how many reachable.
+     Anything you have picked stays picked while it is shut. */
+  const openFests = state.openLineups || (state.openLineups = {});
+  let html = '<div class="agenda-tools">' +
+    '<span class="muted">' + groups.size + " lineup" + (groups.size === 1 ? "" : "s") + "</span>" +
+    '<button class="btn btn-sm" data-act="lineups-all" data-open="1">Expand all</button>' +
+    '<button class="btn btn-sm" data-act="lineups-all" data-open="">Collapse all</button></div>';
 
   Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
     const list = groups.get(fest).sort((a, b) =>
@@ -3580,13 +3588,17 @@ function outreachLineups(rows) {
       : list).filter((r) => inBand(r.venue, band));
     const pickedHere = list.filter((r) => sel[r.id]);
 
-    html += '<div class="lineup">';
+    const isOpen = !!openFests[fest];
+    html += '<div class="lineup' + (isOpen ? " open" : "") + '">';
 
-    // header
-    html += '<div class="lineup-head">' +
+    // header — the whole thing toggles, but the buttons inside it act on their own
+    html += '<div class="lineup-head" data-act="lineup-toggle" data-fest="' + esc(fest) +
+      '" aria-expanded="' + isOpen + '">' +
+      '<span class="agenda-caret" aria-hidden="true">\u203a</span>' +
       '<span class="lineup-name">' + esc(fest) + "</span>" +
       '<span class="lineup-meta">' + list.length + " act" + (list.length === 1 ? "" : "s") +
-      " \u00b7 " + withEmail.length + " reachable</span>" +
+      " \u00b7 " + withEmail.length + " reachable" +
+      (pickedHere.length ? " \u00b7 " + pickedHere.length + " selected" : "") + "</span>" +
       (pickedHere.length
         ? '<button class="btn btn-sm btn-primary" data-act="draft-each" data-fest="' + esc(fest) +
           '">\u2709 Draft ' + pickedHere.length + " separately</button>" +
@@ -3595,6 +3607,8 @@ function outreachLineups(rows) {
         : '<button class="btn btn-sm" data-act="pick-all" data-fest="' + esc(fest) +
           '">Select all reachable</button>') +
       "</div>";
+
+    if (!isOpen) { html += "</div>"; return; }
 
     // filters
     const fb = (key, label, n) => '<button class="fbtn' + (filter === key ? " on" : "") +
@@ -4767,6 +4781,22 @@ document.addEventListener("click", (e) => {
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
     case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
     case "toggle-gig-paid": toggleGigPaid(id, el.checked); break;
+    case "lineup-toggle": {
+      state.openLineups = state.openLineups || {};
+      const f = el.dataset.fest;
+      if (state.openLineups[f]) delete state.openLineups[f]; else state.openLineups[f] = true;
+      render();
+      break;
+    }
+    case "lineups-all": {
+      state.openLineups = {};
+      if (el.dataset.open) {
+        Object.keys(window.ARTIST_FESTIVALS || {}).forEach((f) => { state.openLineups[f] = true; });
+        (DB.outreach || []).forEach((r) => { if (r.festival) state.openLineups[r.festival] = true; });
+      }
+      render();
+      break;
+    }
     case "lineup-band":
       state.lineupBand = state.lineupBand || {};
       state.lineupBand[el.dataset.fest] = el.dataset.key;

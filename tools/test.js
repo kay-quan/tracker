@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=54" }],
+  scripts: [{ getAttribute: () => "app.js?v=55" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -389,9 +389,20 @@ t("drafting stores the acts but does NOT mark them contacted", () => {
 
 t("drafted acts render as drafted, not as emailed", () => {
   const db = drafted();
-  T.setState({ view: "outreach", outreachMode: "lineups", picked: {} });
+  // Lineup cards collapse to their heading, so open this one before reading the chips.
+  T.setState({ view: "outreach", outreachMode: "lineups", picked: {},
+               openLineups: { [FEST]: true } });
   const html = T.outreachLineups(db.outreach);
   if (html.indexOf("pick-act drafted") < 0) throw new Error("no drafted styling in output");
+});
+
+t("a collapsed lineup still shows its heading and counts", () => {
+  const db = drafted();
+  T.setState({ view: "outreach", outreachMode: "lineups", picked: {}, openLineups: {} });
+  const html = T.outreachLineups(db.outreach);
+  if (html.indexOf(FEST) < 0) throw new Error("festival name missing when collapsed");
+  if (html.indexOf("reachable") < 0) throw new Error("counts missing when collapsed");
+  if (html.indexOf("pick-act") >= 0) throw new Error("act chips should not render when collapsed");
 });
 
 t("confirming turns drafted into contacted", () => {

@@ -2082,3 +2082,14 @@ td.muted { color: var(--ink-3); }
 }
 .agenda-day.open .agenda-caret { transform: rotate(90deg); }
 .agenda-day > .agenda-date .agenda-count { margin-left: auto; }
+
+/* ---------- Outreach: lineups collapse to their heading ---------- */
+
+.lineup-head {
+  cursor: pointer;
+  user-select: none;
+}
+.lineup-head:hover .lineup-name { color: var(--accent); }
+.lineup.open > .lineup-head .agenda-caret { transform: rotate(90deg); }
+/* Buttons inside the heading act on their own, so they must not read as part of it. */
+.lineup-head .btn { cursor: pointer; }
