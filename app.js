@@ -3544,6 +3544,130 @@ function inBand(name, key) {
   return b && f != null && f >= b.lo && f < b.hi;
 }
 
+/* ---------- festival posters ----------
+   Your own copy of a poster, not one fetched from the web: these are the promoters'
+   artwork, this site is served from a public repo, and a poster pulled off a search
+   result is as likely to be last year's as this year's.
+
+   Two sizes, stored separately on purpose. The thumbnail is tiny and loads with the
+   tab so seventeen headings can each carry one. The full image is its own document
+   and is only read when you actually open it — otherwise every visit would pull a
+   few megabytes to show pictures the size of a stamp. */
+
+const POSTER_THUMB_W = 260;
+const POSTER_FULL_W = 1500;
+
+function festSlug(fest) {
+  return String(fest).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+}
+
+function resizeImage(dataUrl, maxW, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error("That file isn't an image I can read."));
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return reject(new Error("That image is empty."));
+      const scale = Math.min(1, maxW / w);
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(w * scale);
+      cv.height = Math.round(h * scale);
+      const ctx = cv.getContext("2d");
+      // Posters are dark artwork; a white matte behind a transparent PNG beats black.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      resolve({ url: cv.toDataURL("image/jpeg", quality), w: cv.width, h: cv.height });
+    };
+    img.src = dataUrl;
+  });
+}
+
+function posterThumb(fest) {
+  return (window.POSTERS || {})[festSlug(fest)] || null;
+}
+
+async function loadPosters() {
+  try {
+    const got = await Cloud.loadRef("posters");
+    window.POSTERS = (got && got.data) || {};
+    if (state.view === "outreach") render();
+  } catch (err) {
+    window.POSTERS = window.POSTERS || {};
+  }
+}
+
+function addPoster(fest) {
+  let inp = $("#poster-file");
+  if (!inp) {
+    inp = document.createElement("input");
+    inp.type = "file";
+    inp.id = "poster-file";
+    inp.accept = "image/*";
+    inp.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0";
+    document.body.appendChild(inp);
+  }
+  inp.value = "";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    setSaveState("Adding poster…", "saving");
+    try {
+      const raw = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error("Couldn't read that file."));
+        r.readAsDataURL(f);
+      });
+      const thumb = await resizeImage(raw, POSTER_THUMB_W, 0.72);
+      const full = await resizeImage(raw, POSTER_FULL_W, 0.82);
+      const slug = festSlug(fest);
+
+      window.POSTERS = window.POSTERS || {};
+      window.POSTERS[slug] = { url: thumb.url, w: thumb.w, h: thumb.h, at: todayISO() };
+      await Cloud.saveRef("posters", window.POSTERS);
+      await Cloud.saveRef("poster-" + slug, { url: full.url, w: full.w, h: full.h });
+
+      setSaveState("Poster added", "");
+      setTimeout(() => setSaveState("", ""), 1600);
+      render();
+    } catch (err) {
+      setSaveState("", "");
+      openModal("Couldn't add that poster", "<p>" + esc(err.message) + "</p>",
+        '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+    }
+  };
+  inp.click();
+}
+
+async function viewPoster(fest) {
+  const slug = festSlug(fest);
+  openModal(fest, '<p class="muted" style="margin:0">Loading…</p>', "", { wide: true });
+  try {
+    const got = await Cloud.loadRef("poster-" + slug);
+    const src = (got && got.data && got.data.url) || (posterThumb(fest) || {}).url;
+    if (!src) throw new Error("No poster stored for this lineup.");
+    openModal(fest,
+      '<img class="posterfull" src="' + src + '" alt="' + esc(fest) + ' lineup">',
+      '<button class="btn btn-danger btn-sm" data-act="remove-poster" data-fest="' + esc(fest) +
+      '">Remove</button><div class="spacer"></div>' +
+      '<button class="btn" data-act="add-poster" data-fest="' + esc(fest) + '">Replace</button>' +
+      '<button class="btn btn-primary" data-act="close-modal">Close</button>', { wide: true });
+  } catch (err) {
+    openModal(fest, "<p>" + esc(err.message) + "</p>",
+      '<button class="btn btn-primary" data-act="close-modal">OK</button>');
+  }
+}
+
+async function removePoster(fest) {
+  const slug = festSlug(fest);
+  if (window.POSTERS) delete window.POSTERS[slug];
+  await Cloud.saveRef("posters", window.POSTERS || {});
+  await Cloud.saveRef("poster-" + slug, {});
+  closeModal();
+  render();
+}
+
 /* ---------- lineups: a card per festival, artists as pickable buttons ---------- */
 
 function outreachLineups(rows) {
@@ -3595,6 +3719,14 @@ function outreachLineups(rows) {
     html += '<div class="lineup-head" data-act="lineup-toggle" data-fest="' + esc(fest) +
       '" aria-expanded="' + isOpen + '">' +
       '<span class="agenda-caret" aria-hidden="true">\u203a</span>' +
+      (function () {
+        const th = posterThumb(fest);
+        return th
+          ? '<img class="lineup-poster" src="' + th.url + '" alt="" data-act="view-poster" ' +
+            'data-fest="' + esc(fest) + '" title="See the full poster">'
+          : '<button class="lineup-poster add" data-act="add-poster" data-fest="' + esc(fest) +
+            '" title="Add the lineup poster">+</button>';
+      })() +
       '<span class="lineup-name">' + esc(fest) + "</span>" +
       '<span class="lineup-meta">' + list.length + " act" + (list.length === 1 ? "" : "s") +
       " \u00b7 " + withEmail.length + " reachable" +
@@ -4781,6 +4913,9 @@ document.addEventListener("click", (e) => {
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
     case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
     case "toggle-gig-paid": toggleGigPaid(id, el.checked); break;
+    case "add-poster": closeModal(); addPoster(el.dataset.fest); break;
+    case "view-poster": viewPoster(el.dataset.fest); break;
+    case "remove-poster": removePoster(el.dataset.fest); break;
     case "lineup-toggle": {
       state.openLineups = state.openLineups || {};
       const f = el.dataset.fest;
@@ -5047,6 +5182,7 @@ async function start() {
   }
   render();
   loadArtistDB();      // not awaited: the app is usable before it lands
+  loadPosters();
   autoRefreshIfStale();
 }
 
