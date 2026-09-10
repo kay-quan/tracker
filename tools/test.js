@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=43" }],
+  scripts: [{ getAttribute: () => "app.js?v=44" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -94,7 +94,8 @@ let app = read("app.js").replace(
   /Cloud\.restore\(\);[\s\S]*$/,
   "globalThis.__T = {akey, artistRec, artistBest, isArtistDirect, clash, warmFor,\n" +
   "  lineupRows, materialise, pitchUrl, outreachLineups, defaultData, withDefaults,\n" +
-  "  draftEach, pickAllReachable, markDraftedSent,\n" +
+  "  draftEach, pickAllReachable, markDraftedSent, invoiceStatus, invoicePaid,\n" +
+  "  linkedPayments, recordPayment, invoiceTotals, invoiceById,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -603,6 +604,73 @@ t("the artist database is never touched by a save", async () => {
 t("a first run with no data anywhere returns null", async () => {
   const { C } = makeCloud();
   eq(await C.load(), null);
+});
+
+/* ================= invoices: paid, and un-paid =================
+   An invoice reads as paid from TWO places - its status field and the payments
+   recorded against it. Missing that is what made "mark unpaid" look broken. */
+
+const invDB = () => {
+  const d = T.defaultData();
+  d.clients = [{ id: "c1", name: "A Client" }];
+  d.invoices = [{ id: "i1", number: "INV-1", clientId: "c1", status: "sent",
+                  sentDate: "2026-08-01",
+                  items: [{ description: "Shoot", qty: 1, rate: 400 }] }];
+  d.income = [];
+  return d;
+};
+
+t("recording full payment marks the invoice paid", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  T.recordPayment(inv, { amount: 400 });
+  eq(T.invoiceStatus(inv), "paid");
+  eq(db.income.length, 1, "income row created");
+});
+
+t("clearing the status alone does NOT un-pay it -- the payment still does", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  T.recordPayment(inv, { amount: 400 });
+  inv.status = "sent";                      // what the dropdown used to do
+  eq(T.invoiceStatus(inv), "paid", "this is the bug the fix exists for");
+});
+
+t("removing the linked payments is what actually un-pays it", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  T.recordPayment(inv, { amount: 400 });
+  db.income = db.income.filter((i) => i.invoiceId !== inv.id);
+  inv.status = "sent";
+  eq(T.invoiceStatus(inv), "sent");
+  eq(T.invoicePaid(inv), 0, "nothing left recorded");
+});
+
+t("linkedPayments finds only this invoice's payments", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  T.recordPayment(inv, { amount: 400 });
+  db.income.push({ id: "x", amount: 99, invoiceId: null, date: "2026-08-02" });
+  db.income.push({ id: "y", amount: 50, invoiceId: "other", date: "2026-08-02" });
+  eq(T.linkedPayments(inv).length, 1, "must not sweep up unrelated income");
+});
+
+t("a part payment reads as partial, not paid", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  T.recordPayment(inv, { amount: 100 });
+  eq(T.invoiceStatus(inv), "partial");
+});
+
+t("standalone income needs no invoice and never touches one", () => {
+  const db = invDB(); T.setDB(db);
+  const inv = db.invoices[0];
+  // exactly what "Log a payment" stores when nothing is linked
+  db.income.push({ id: "p1", date: "2026-07-04", amount: 250, clientId: "",
+                   invoiceId: null, source: "Print sales", method: "Zelle" });
+  eq(T.invoicePaid(inv), 0, "unlinked money must not pay an invoice off");
+  eq(T.invoiceStatus(inv), "sent", "invoice untouched");
+  eq(db.income.filter((i) => !i.invoiceId).length, 1, "logged on its own");
 });
 
 /* ---------- report ---------- */
