@@ -1410,6 +1410,24 @@ function monthLabelOf(calMonth) {
   return new Date(yy, mm - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
+/* Every day a personal event covers, so a week-long trip appears across the week
+   rather than only on the day it starts. Capped so a mistyped year can't spin. */
+function personalDays(e) {
+  const out = [e.date];
+  if (!e.endDate || e.endDate <= e.date) return out;
+  let d = e.date;
+  for (let i = 0; i < 400 && d < e.endDate; i++) {
+    d = addDays(d, 1);
+    out.push(d);
+  }
+  return out;
+}
+
+function spanLabel(e) {
+  if (!e.endDate || e.endDate <= e.date) return "";
+  return fmtDate(e.date) + " – " + fmtDate(e.endDate);
+}
+
 /* ---------- personal events ----------
    Things in your own life that share the calendar with work: a birthday, a trip,
    a doctor's appointment. They carry no client, no rate and no invoice, and they
@@ -1421,18 +1439,23 @@ const PERSONAL_KINDS = ["Personal", "Birthday", "Trip", "Appointment", "Family",
 function personalById(id) { return (DB.personal || []).find((x) => x.id === id); }
 
 function personalForm(rec, presetDate) {
-  const e = rec || { id: null, title: "", date: presetDate || todayISO(), startTime: "",
-                     endTime: "", kind: "Personal", location: "", notes: "" };
+  const e = rec || { id: null, title: "", date: presetDate || todayISO(), endDate: "",
+                     startTime: "", endTime: "", kind: "Personal", location: "", notes: "" };
   const body =
     '<form id="personal-form">' +
     '<div class="field"><label>What is it?</label>' +
     '<input name="title" value="' + esc(e.title) + '" required ' +
     'placeholder="e.g. Mum\u2019s birthday, Vegas trip, dentist"></div>' +
     '<div class="field-row">' +
-    '<div class="field"><label>Date</label><input type="date" name="date" value="' +
+    '<div class="field"><label>Starts</label><input type="date" name="date" value="' +
     esc(e.date) + '" required></div>' +
+    /* Blank for a single day. A trip that runs a week should show on all seven,
+       not just the day you leave. */
+    '<div class="field"><label>Ends <span class="hint">leave blank for one day</span>' +
+    '</label><input type="date" name="endDate" value="' + esc(e.endDate || "") + '"></div>' +
+    "</div>" +
     '<div class="field"><label>Kind</label><select name="kind">' +
-    selectOptions(PERSONAL_KINDS, e.kind, "") + "</select></div></div>" +
+    selectOptions(PERSONAL_KINDS, e.kind, "") + "</select></div>" +
     '<div class="field-row">' +
     '<div class="field"><label>Start <span class="hint">optional</span></label>' +
     '<input type="time" name="startTime" value="' + esc(e.startTime) + '"></div>' +
@@ -1456,8 +1479,14 @@ function savePersonal(id) {
   if (!v.title.trim() || !v.date) return;
   const existing = id ? personalById(id) : null;
   const rec = existing || { id: uid() };
+  /* An end before the start is a typo, not an instruction. Swap them rather than
+     storing a range that spans no days and renders nowhere. */
+  let from = v.date, to = (v.endDate || "").trim();
+  if (to && to < from) { const t = from; from = to; to = t; }
+  if (to === from) to = "";                  // a one-day range is just a date
+
   Object.assign(rec, {
-    title: v.title.trim(), date: v.date, kind: v.kind || "Personal",
+    title: v.title.trim(), date: from, endDate: to, kind: v.kind || "Personal",
     startTime: v.startTime, endTime: v.endTime,
     location: v.location.trim(), notes: v.notes.trim(),
   });
@@ -1473,7 +1502,9 @@ function gigsCalendar() {
   // Personal events share the grid but are kept in their own bucket throughout,
   // so nothing downstream can mistake one for billable work.
   const persByDate = {};
-  (DB.personal || []).forEach((e) => { (persByDate[e.date] = persByDate[e.date] || []).push(e); });
+  (DB.personal || []).forEach((e) => {
+    personalDays(e).forEach((d) => { (persByDate[d] = persByDate[d] || []).push(e); });
+  });
 
   const live = workGigs();
   const monthGigs = live.filter((g) => (g.date || "").slice(0, 7) === state.calMonth)
@@ -1528,10 +1559,14 @@ function gigsCalendar() {
       '" data-act="edit-gig" data-id="' + esc(g.id) + '" title="' +
       esc((g.title || "Gig") + " — " + clientName(g.clientId) + " — " + money(gigValue(g))) + '">' +
       esc(g.title || "Gig") + "</div>").join("") +
-      pers.slice(0, room).map((e) =>
-        '<div class="evchip pers" data-act="edit-personal" data-id="' + esc(e.id) + '" title="' +
-        esc(e.title + (e.location ? " · " + e.location : "")) + '">' +
-        esc(e.title) + "</div>").join("") +
+      pers.slice(0, room).map((e) => {
+        // A middle day of a trip is prefixed, so the first day still reads as the start.
+        const cont = e.endDate && e.date !== iso;
+        return '<div class="evchip pers" data-act="edit-personal" data-id="' + esc(e.id) +
+          '" title="' + esc(e.title + (spanLabel(e) ? " · " + spanLabel(e) : "") +
+            (e.location ? " · " + e.location : "")) + '">' +
+          (cont ? "· " : "") + esc(e.title) + "</div>";
+      }).join("") +
       (hidden ? '<div class="evmore">+' + hidden + " more</div>" : "");
   }, "gig-day");
 
@@ -1605,17 +1640,24 @@ function gigDayPanel(list, pers) {
         '" title="Edit">\u270e</button></div>';
     }).join("");
 
-    html += pers.map((e) =>
-      '<div class="evrow pers"><div class="evtime">' +
-      (e.startTime ? esc(fmtTime(e.startTime)) +
-        (e.endTime ? "–" + esc(fmtTime(e.endTime)) : "") : "all day") + "</div>" +
-      '<div class="evbody"><div class="evtitle">' + esc(e.title) +
-      ' <span class="chip pers">' + esc(e.kind || "Personal") + "</span></div>" +
-      (e.location ? '<div class="evdetails">' + esc(e.location) + "</div>" : "") +
-      (e.notes ? '<div class="evdetails">' + esc(e.notes) + "</div>" : "") +
-      "</div>" +
-      '<button class="iconbtn" data-act="edit-personal" data-id="' + esc(e.id) +
-      '" title="Edit">\u270e</button></div>').join("");
+    html += pers.map((e) => {
+      const span = spanLabel(e);
+      /* On a multi-day event the times belong to the event, not to this one day,
+         so the slot says which day of the run you are looking at instead. */
+      const when = span
+        ? "day " + (personalDays(e).indexOf(iso) + 1) + " of " + personalDays(e).length
+        : (e.startTime ? esc(fmtTime(e.startTime)) +
+            (e.endTime ? "–" + esc(fmtTime(e.endTime)) : "") : "all day");
+      return '<div class="evrow pers"><div class="evtime">' + when + "</div>" +
+        '<div class="evbody"><div class="evtitle">' + esc(e.title) +
+        ' <span class="chip pers">' + esc(e.kind || "Personal") + "</span></div>" +
+        (span ? '<div class="evdetails">' + esc(span) + "</div>" : "") +
+        (e.location ? '<div class="evdetails">' + esc(e.location) + "</div>" : "") +
+        (e.notes ? '<div class="evdetails">' + esc(e.notes) + "</div>" : "") +
+        "</div>" +
+        '<button class="iconbtn" data-act="edit-personal" data-id="' + esc(e.id) +
+        '" title="Edit">\u270e</button></div>';
+    }).join("");
   }
   html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn btn-sm" data-act="new-gig" data-date="' + esc(iso) +

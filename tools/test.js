@@ -45,7 +45,7 @@ const el = () => ({
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
 });
 const doc = {
-  scripts: [{ getAttribute: () => "app.js?v=51" }],
+  scripts: [{ getAttribute: () => "app.js?v=52" }],
   body: el(), documentElement: el(), head: el(),
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
   createElement: () => el(), addEventListener: noop, removeEventListener: noop,
@@ -99,6 +99,7 @@ let app = read("app.js").replace(
   "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS,\n" +
   "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
+  "  personalDays, spanLabel,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -877,6 +878,59 @@ t("the sync knows how to store them", () => {
   if (!/p:\s*"personal"/.test(cloudSrc)) {
     throw new Error("RECORD_TYPES has no prefix for personal — they would not sync");
   }
+});
+
+/* ================= multi-day personal events ================= */
+
+t("a one-day event covers exactly one day", () => {
+  T.setDB(T.defaultData());
+  eq(JSON.stringify(T.personalDays({ date: "2026-09-12" })), JSON.stringify(["2026-09-12"]));
+  eq(JSON.stringify(T.personalDays({ date: "2026-09-12", endDate: "" })),
+     JSON.stringify(["2026-09-12"]));
+  eq(T.spanLabel({ date: "2026-09-12" }), "", "no range to show");
+});
+
+t("a trip covers every day from start to end, inclusive", () => {
+  T.setDB(T.defaultData());
+  const days = T.personalDays({ date: "2026-09-20", endDate: "2026-09-24" });
+  eq(days.length, 5, "20th through 24th is five days");
+  eq(days[0], "2026-09-20");
+  eq(days[4], "2026-09-24");
+});
+
+t("a span crossing a month boundary still works", () => {
+  T.setDB(T.defaultData());
+  const days = T.personalDays({ date: "2026-09-29", endDate: "2026-10-02" });
+  eq(JSON.stringify(days),
+     JSON.stringify(["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"]));
+});
+
+t("a leap day is not skipped", () => {
+  T.setDB(T.defaultData());
+  const days = T.personalDays({ date: "2028-02-27", endDate: "2028-03-01" });
+  if (days.indexOf("2028-02-29") < 0) throw new Error("2028 is a leap year: " + days.join(","));
+  eq(days.length, 4);
+});
+
+t("an end before the start cannot produce a range that renders nowhere", () => {
+  T.setDB(T.defaultData());
+  // personalDays must never return an empty list, whatever it is handed
+  eq(T.personalDays({ date: "2026-09-20", endDate: "2026-09-10" }).length, 1,
+     "a backwards range falls back to the single start day");
+});
+
+t("a mistyped year cannot spin forever", () => {
+  T.setDB(T.defaultData());
+  const days = T.personalDays({ date: "2026-09-01", endDate: "2126-09-01" });
+  if (days.length > 401) throw new Error("unbounded: " + days.length);
+});
+
+t("the span label reads as a range only when there is one", () => {
+  T.setDB(T.defaultData());
+  const l = T.spanLabel({ date: "2026-09-20", endDate: "2026-09-24" });
+  if (l.indexOf("–") < 0) throw new Error("expected a range, got: " + l);
+  eq(T.spanLabel({ date: "2026-09-20", endDate: "2026-09-20" }), "",
+     "same day both ends is not a range");
 });
 
 /* ---------- report ---------- */

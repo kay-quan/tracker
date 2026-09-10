@@ -344,7 +344,7 @@ td.actions .btn { margin-left: 4px; }
 /* Gig cells hold a couple of one-line chips; Local Events puts a name over a venue
    on each row, so it needs the extra height. */
 .cal-grid.gigs .cal-day { min-height: 88px; }
-.cal-grid.events .cal-day { min-height: 124px; }
+.cal-grid.events .cal-day { min-height: 92px; }
 .cal-day:hover { border-color: var(--ink-3); }
 .cal-day.other { opacity: 0.45; }
 .cal-day.other .cal-date { color: var(--border-strong); }
@@ -2025,3 +2025,17 @@ td.muted { color: var(--ink-3); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .dot-gig { background: var(--money-in); }
 .dot-pers { background: var(--pers); }
+
+
+/* ---------- Local Events: one line per show ----------
+   The venue used to sit under the name in the grid because the grid was the only
+   place it appeared. It is now on the chip's tooltip, in the opened day and in the
+   List view, so the month can go back to being a shape you scan rather than a
+   second copy of the listings. Declared last because .ev-venue sets display above. */
+.cal-grid.events .cal-event {
+  white-space: nowrap;
+  line-height: 1.3;
+  padding: 2px 6px;
+  margin-top: 2px;
+}
+.cal-grid.events .ev-venue { display: none; }
