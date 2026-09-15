@@ -17,3 +17,7 @@ __pycache__/
 *.bak
 *.pyc
 .DS_Store
+
+# A working note to Claude, not app code. Local only: it names Jay, the
+# Firebase layout and a past incident, none of which belongs on a public repo.
+CLAUDE.md
