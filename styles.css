@@ -2932,3 +2932,150 @@ td input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--prima
   @keyframes xp-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   .meter-fill { transition: none; }
 }
+
+/* ============================================================
+   BATTLE: the hero and today's slime
+   ============================================================ */
+
+.battle { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 22px;
+          align-items: center; padding: 18px 22px; margin-bottom: 30px; overflow: hidden; }
+.battle-stage { position: relative; background: var(--sky); border: var(--line) solid var(--outline);
+                border-radius: 16px; overflow: hidden; }
+.battle-svg { display: block; width: 100%; height: auto; }
+.ground { fill: var(--grass); }
+.ground-line { fill: #14142B; }
+:root { --sky: #CFE0FF; --grass: #7FD07A; }
+@media (prefers-color-scheme: dark) { :root { --sky: #2A3166; --grass: #3E8E57; } }
+
+.battle-info { min-width: 0; }
+.battle-names { font-size: 21px; margin: 0 0 12px; line-height: 1.35; }
+.battle-names strong { font-family: var(--game); font-weight: 700; }
+.battle-names .lv, .battle-names .vs { color: var(--ink-2); }
+.meter-hp .meter-fill { background: #2BB673; }
+.battle-hp { margin: 8px 0 4px; font-size: 19px; color: var(--ink-2); }
+.battle-hp strong { font-family: var(--game); color: var(--ink); }
+.battle-caption { font-size: 18px; color: var(--ink-2); margin: 4px 0 14px; }
+
+/* idle: the hero breathes, the slime wobbles */
+.hero-anim { animation: hero-bob 1.2s steps(2, jump-none) infinite; }
+@keyframes hero-bob { 50% { transform: translateY(-1px); } }
+.weapon-swing { transform-box: fill-box; transform: rotate(28deg); }
+.slime-anim { transform-box: fill-box; transform-origin: 50% 100%; animation: slime-bob 1.1s ease-in-out infinite; }
+@keyframes slime-bob { 50% { transform: scale(1.08, 0.88); } }
+.slime-shut { display: none; }
+
+/* asleep: nothing picked yet */
+.battle.asleep .slime-eyes { display: none; }
+.battle.asleep .slime-shut { display: inline; }
+.battle.asleep .slime-anim { animation-duration: 2.6s; }
+.zzz, .victory, .dmg { position: absolute; pointer-events: none; font-family: var(--game); font-weight: 700; }
+.zzz { display: none; right: 14%; top: 8%; font-size: 22px; color: var(--ink); }
+.zzz span { display: inline-block; margin-left: 2px; }
+.zzz span:last-child { font-size: 30px; }
+.battle.asleep .zzz { display: block; animation: zzz 2.4s ease-in-out infinite; }
+@keyframes zzz { 50% { transform: translateY(-6px); opacity: 0.6; } }
+
+/* a hit: lunge, swing, flash */
+.battle.attack .hero-anim { animation: hero-lunge 0.55s ease-in-out; }
+@keyframes hero-lunge { 35%, 55% { transform: translateX(19px); } 100% { transform: none; } }
+.battle.attack .weapon-swing { animation: swing 0.55s ease-in-out; }
+@keyframes swing { 0% { transform: rotate(28deg); } 25% { transform: rotate(-40deg); }
+                   50% { transform: rotate(125deg); } 100% { transform: rotate(28deg); } }
+.battle.attack .slime-anim { animation: slime-hit 0.55s; }
+@keyframes slime-hit {
+  0%, 42% { transform: none; filter: none; }
+  50% { transform: translateX(3px) scale(1.15, 0.7); filter: brightness(2.4); }
+  65% { transform: translateX(-2px); filter: none; }
+  80% { transform: translateX(1px); }
+  100% { transform: none; }
+}
+.dmg { left: 70%; top: 18%; font-size: 30px; color: #FFFFFF; -webkit-text-stroke: 2px #14142B;
+       paint-order: stroke fill; opacity: 0; }
+.dmg.show { animation: dmg 0.9s 0.2s ease-out both; }
+@keyframes dmg { 0% { opacity: 0; transform: translateY(8px) scale(0.6); }
+                 25% { opacity: 1; transform: translateY(0) scale(1.15); }
+                 100% { opacity: 0; transform: translateY(-34px) scale(1); } }
+
+/* beaten: the slime pops and the hero celebrates */
+.battle.won .slime-anim { opacity: 0; animation: none; }
+.battle.won.finishing .slime-anim { animation: slime-poof 0.5s 0.25s both; }
+@keyframes slime-poof { 0% { opacity: 1; transform: none; filter: brightness(2); }
+                        100% { opacity: 0; transform: scale(1.5, 0.2); } }
+.battle.won .hero-anim { animation: hero-cheer 0.9s steps(2, jump-none) infinite; }
+@keyframes hero-cheer { 50% { transform: translateY(-3px); } }
+.victory { display: none; right: 8%; top: 22%; font-size: 30px; color: #14142B; background: var(--yellow);
+           border: var(--line) solid #14142B; border-radius: 999px; padding: 2px 16px; box-shadow: 3px 3px 0 #14142B; }
+.battle.won .victory { display: block; }
+.battle.won.finishing .victory { animation: lu-pop 0.45s 0.6s both; }
+
+/* ============================================================
+   HERO: portrait and customiser
+   ============================================================ */
+
+.hero-portrait { display: block; width: 100%; height: auto; }
+.hero-editor .hero-preview {
+  width: 150px; margin: 0 auto 20px; padding: 10px;
+  background: var(--sky); border: var(--line) solid var(--outline); border-radius: 18px;
+}
+.opts { display: flex; flex-wrap: wrap; gap: 10px; }
+.opt {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 6px 14px;
+  font-family: var(--game); font-weight: 600; font-size: 17px;
+  background: var(--surface); color: var(--ink);
+  border: var(--line) solid var(--outline); border-radius: 999px; cursor: pointer;
+}
+.opt:hover { background: var(--surface-2); }
+.opt[aria-pressed="true"] { background: var(--primary); color: #fff; box-shadow: 3px 3px 0 var(--shadow-c); }
+.opt[aria-pressed="true"]::before { content: "\2713"; }
+.swatch-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #14142B; flex: none; }
+
+/* ============================================================
+   PERSONAL: hero card and the playbook
+   ============================================================ */
+
+.hero-card { display: flex; align-items: center; gap: 24px; padding: 20px 24px; margin-bottom: 8px; }
+.hero-card .hero-portrait { width: 110px; flex: none; background: var(--sky); border: var(--line) solid var(--outline);
+                            border-radius: 18px; padding: 6px; }
+.hero-card h1 { font-size: 32px; margin: 0 0 4px; }
+.hero-card p { margin: 0 0 12px; color: var(--ink-2); font-size: 19px; }
+.page-lede { font-size: 19px; color: var(--ink-2); margin: -4px 0 14px; max-width: 760px; }
+
+.tips { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 22px; margin-top: 8px; }
+.tip { padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.tip-featured { background: var(--yellow-hi); }
+.tip h3 { font-size: 25px; margin: 0; line-height: 1.2; }
+.tip-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tip-icon { font-size: 30px; line-height: 1; margin-right: 4px; }
+.tip-what { margin: 0; font-size: 20px; }
+.tip-why { margin: 0; font-size: 17px; color: var(--ink-2); }
+.tip-why a { font-weight: 800; }
+.tip .btn { margin-top: auto; align-self: flex-start; white-space: normal; text-align: left; line-height: 1.25; }
+.tag-ev { background: var(--surface-2); color: var(--ink); }
+.tag-ev.ev-strong { background: #2BB673; color: #14142B; }
+.tag-ev.ev-good { background: #9FE2B8; color: #14142B; }
+.tag-ev.ev-expert { background: #C9D3FF; color: #14142B; }
+.tag-ev.ev-early { background: #FFE27A; color: #14142B; }
+.fine-print { font-size: 16px; color: var(--ink-2); margin: 30px 0 0; max-width: 760px; }
+
+@media (max-width: 760px) {
+  .battle { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 14px; }
+  .hero-card { gap: 16px; padding: 16px; }
+  .hero-card .hero-portrait { width: 84px; }
+  .hero-card h1 { font-size: 26px; }
+  .tab-label { font-size: 12px; }
+  .tab-icon svg { width: 24px; height: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-anim, .slime-anim, .weapon-swing, .zzz, .dmg.show,
+  .battle.won.finishing .victory { animation: none !important; }
+  .dmg.show { opacity: 1; }
+}
+/* Six tabs on a phone: tighter gaps so "Personal" fits its button. */
+@media (max-width: 480px) {
+  .tabbar { gap: 3px; padding-left: 6px; padding-right: 6px; }
+  .tab { padding: 6px 1px; min-width: 0; }
+  .tab-label { font-size: 11.5px; }
+}
+.hero-editor .hero-preview { width: 180px; }

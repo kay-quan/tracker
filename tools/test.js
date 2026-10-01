@@ -100,6 +100,7 @@ let app = read("app.js").replace(
   "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
   "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
+  "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, slimeOfDay,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -989,6 +990,58 @@ t("old data with no game section loads with an empty one", () => {
   const db = T.withDefaults({ settings: {} });
   eq(db.game.bankedXP, 0);
   eq(Array.isArray(db.game.bankedDays), true, "bankedDays is a list");
+});
+
+/* ---------- the battle, the hero, the playbook ---------- */
+
+t("the slime's health is today's quest XP, and finishing them all wins", () => {
+  const db = T.withDefaults(T.defaultData());
+  const today = T.isoOf(new Date());
+  db.todos = [
+    { id: "a", text: "a", done: false, top: true, topRank: 0, xp: 30 },
+    { id: "b", text: "b", done: true, doneAt: today },
+    { id: "c", text: "c", done: true, doneAt: "2020-01-01" },     // an old win doesn't count
+  ];
+  T.setDB(db);
+  let b = T.battleState(T.todaysQuests());
+  eq(b.maxHP, 50, "30 open + 20 done today");
+  eq(b.hp, 30, "only the open quest is left");
+  eq(b.won, false);
+  db.todos[0].done = true; db.todos[0].doneAt = today; db.todos[0].top = false;
+  b = T.battleState(T.todaysQuests());
+  eq(b.hp, 0); eq(b.won, true, "all done today");
+});
+
+t("with no quests the slime is asleep, not beaten", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.setDB(db);
+  const b = T.battleState(T.todaysQuests());
+  eq(b.asleep, true); eq(b.won, false);
+});
+
+t("a hero with nothing saved gets the defaults, and saved picks survive", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.setDB(db);
+  eq(T.heroOf().weapon, "sword");
+  db.game.hero = { weapon: "staff", outfit: 3 };
+  const h = T.heroOf();
+  eq(h.weapon, "staff"); eq(h.outfit, 3); eq(h.hat, "none", "unsaved fields fall back");
+  if (!T.HERO_OPTIONS.outfit[h.outfit]) throw new Error("outfit index out of range");
+});
+
+t("the slime of the day is stable for a given date", () => {
+  eq(T.slimeOfDay("2026-10-01")[0], T.slimeOfDay("2026-10-01")[0]);
+});
+
+t("every playbook tip has a real source link, an evidence rating and a quest", () => {
+  const ids = new Set();
+  T.PLAYBOOK.forEach((p) => {
+    if (ids.has(p.id)) throw new Error("duplicate id " + p.id);
+    ids.add(p.id);
+    if (!/^https:\/\//.test(p.src[1])) throw new Error(p.id + ": source is not an https link");
+    if (!T.EVIDENCE[p.evidence]) throw new Error(p.id + ": unknown evidence level " + p.evidence);
+    if (!p.quest || !p.what || !p.why) throw new Error(p.id + ": missing text");
+  });
 });
 
 /* ---------- report ---------- */

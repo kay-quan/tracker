@@ -473,6 +473,7 @@ const TAB_ICONS = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
   money: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.5-.8-1.4-1.2-2.5-1.2-1.5 0-2.7.8-2.7 2s1.2 1.7 2.7 2 2.8.8 2.8 2-1.3 2-2.8 2c-1.1 0-2-.4-2.5-1.2M12 6.5V8m0 8v1.5"/>',
   outreach: '<path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/>',
+  personal: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21c.6-4.2 3.7-7 7.5-7s6.9 2.8 7.5 7"/>',
   invoices: '<path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h12a1 1 0 001-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
 };
 
@@ -482,6 +483,7 @@ const TABS = [
   { view: "money", label: "Money" },
   { view: "outreach", label: "Outreach" },
   { view: "invoices", label: "Invoices" },
+  { view: "personal", label: "Personal" },
 ];
 
 // Badges flag only what needs a decision from you.
@@ -1084,6 +1086,7 @@ function playReward(t, before, after, at) {
   }
   const pill = $(".hud-xp");
   if (pill) pill.classList.add("bump");
+  playStrike(taskXP(t));
 
   const levelUp = after.level > before.level;
   const fill = $(".xpbar .meter-fill");
@@ -1374,6 +1377,494 @@ function nudges() {
   return out;
 }
 
+/* ============================================================
+   HERO & BATTLE
+   A pixel hero on the Today screen fights a slime whose health is today's quests.
+   Every quest finished is a hit, worth the quest's XP; finish them all and the
+   slime is beaten. The sprites are drawn as SVG rects from the little maps below,
+   one character per pixel, so they stay sharp at any size.
+   ============================================================ */
+
+const HERO_OPTIONS = {
+  skin: [["Porcelain", "#FFE3CC"], ["Peach", "#F2C291"], ["Tan", "#D99B6C"],
+         ["Bronze", "#A86B45"], ["Deep", "#6E4630"]],
+  hairColor: [["Black", "#231A16"], ["Brown", "#6B3E1F"], ["Blonde", "#E8B64A"],
+              ["Red", "#D9442E"], ["Blue", "#3D7BFF"], ["Silver", "#E6E8F2"]],
+  hairStyle: [["Short", "short"], ["Long", "long"], ["Spiky", "spiky"]],
+  hat: [["None", "none"], ["Helmet", "helmet"], ["Wizard hat", "wizard"], ["Bandana", "bandana"]],
+  outfit: [["Blue", "#2F4BFF"], ["Red", "#E5484D"], ["Green", "#2BB673"],
+           ["Purple", "#7A4DFF"], ["Orange", "#FF9F1C"], ["Slate", "#4A5080"]],
+  weapon: [["Sword", "sword"], ["Axe", "axe"], ["Staff", "staff"], ["Hammer", "hammer"]],
+};
+
+const HERO_DEFAULT = { name: "", skin: 1, hairColor: 1, hairStyle: "short", hat: "none",
+                       outfit: 0, weapon: "sword" };
+
+function heroOf() {
+  return Object.assign({}, HERO_DEFAULT, (DB.game && DB.game.hero) || {});
+}
+
+function heroName(h) {
+  return (h.name || "").trim() || firstName() || "Hero";
+}
+
+// "#RRGGBB" darkened by a fraction, for shading.
+function shade(hex, by) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.max(0, Math.round(v * (1 - by)));
+  return "#" + [f(n >> 16), f((n >> 8) & 255), f(n & 255)]
+    .map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+// Each run of one colour along a row becomes one rect.
+function pixelRects(rows, pal, ox, oy) {
+  let out = "";
+  rows.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const c = row[x];
+      if (!pal[c]) { x++; continue; }
+      let w = 1;
+      while (row[x + w] === c) w++;
+      out += '<rect x="' + (x + (ox || 0)) + '" y="' + (y + (oy || 0)) + '" width="' + w +
+        '" height="1" fill="' + pal[c] + '"/>';
+      x += w;
+    }
+  });
+  return out;
+}
+
+/* The hero faces right. K is the ink outline; H hair, S skin, E eye, O/o outfit,
+   B belt and boots, P trousers. The hand is the S at column 12, row 9. */
+const HERO_HEADS = {
+  short: { y: 0, rows: [
+    "....KKKKKK....",
+    "...KHHHHHHK...",
+    "..KHHHHHHHHK..",
+    "..KHHSSSSSSK..",
+    "..KHSSSSESSK..",
+    "..KHSSSSESSK..",
+    "..KKSSSSSSSK..",
+    "...KKSSSSKK..."] },
+  long: { y: 0, rows: [
+    "....KKKKKK....",
+    "...KHHHHHHK...",
+    "..KHHHHHHHHK..",
+    "..KHHSSSSSSK..",
+    "..KHHSSSESSK..",
+    "..KHHSSSESSK..",
+    "..KHHSSSSSSK..",
+    "..KHHKSSSSKK.."] },
+  spiky: { y: -1, rows: [
+    "...K.K.K.K....",
+    "..KHKHKHKHK...",
+    "..KHHHHHHHHK..",
+    "..KHHHHHHHHK..",
+    "..KHHSSSSSSK..",
+    "..KHSSSSESSK..",
+    "..KHSSSSESSK..",
+    "..KKSSSSSSSK..",
+    "...KKSSSSKK..."] },
+};
+
+const HERO_BODY = [
+  "..KOOOOOOOOK..",
+  ".KSOOOOOOOOSK.",
+  ".KSOoOOOOoOSK.",
+  "..KOOBBBBOOK..",
+  "..KOOOOOOOOK..",
+  "...KPPKKKPPK..",
+  "...KPPK.KPPK..",
+  "...KBBK.KBBK..",
+  "...KKKK.KKKK.."];
+
+const HERO_HATS = {
+  none: null,
+  helmet: { y: 0, rows: [
+    "....KKKKKK....",
+    "...KMMMMMMK...",
+    "..KMMWMMMMMK..",
+    "..KmmmmmmmmK.."] },
+  wizard: { y: -5, rows: [
+    "........K.....",
+    ".......KZK....",
+    "......KZZK....",
+    ".....KZYZZK...",
+    "....KZZZZZZK..",
+    "..KKZZZZZZZZKK",
+    ".KKKKKKKKKKKK."] },
+  bandana: { y: 2, rows: [
+    ".oKOOOOOOOOK..",
+    "o............."] },
+};
+
+// gx, gy: the grip pixel, which sits in the hero's hand.
+const HERO_WEAPONS = {
+  sword: { gx: 2, gy: 8, rows: [
+    "..K..", ".KWK.", ".KWK.", ".KWK.", ".KWK.", ".KWK.", ".KWK.",
+    "KYYYK", ".KGK.", ".KGK.", "..K.."] },
+  axe: { gx: 2, gy: 7, rows: [
+    "...KKK.", ".KKMMMK", ".KGKMMK", ".KGKMMK", ".KKMMMK",
+    "..KGKK.", "..KGK..", "..KGK..", "..KGK..", "..KKK.."] },
+  staff: { gx: 2, gy: 8, rows: [
+    ".KKK.", "KCCCK", "KCWCK", "KCCCK", ".KKK.",
+    ".KGK.", ".KGK.", ".KGK.", ".KGK.", ".KGK.", "..K.."] },
+  hammer: { gx: 3, gy: 7, rows: [
+    "KKKKKKK", "KMMMMMK", "KMWMMMK", "KKKGKKK",
+    "..KGK..", "..KGK..", "..KGK..", "..KGK..", "..KGK..", "..KKK.."] },
+};
+
+function heroPalette(h) {
+  const pick = (list, i) => (list[i] || list[0])[1];
+  const outfit = pick(HERO_OPTIONS.outfit, h.outfit);
+  return {
+    K: "#14142B", E: "#14142B",
+    S: pick(HERO_OPTIONS.skin, h.skin),
+    H: pick(HERO_OPTIONS.hairColor, h.hairColor),
+    O: outfit, o: shade(outfit, 0.25),
+    B: "#5A3A1E", P: "#4B3A2E",
+    M: "#C9D1E8", m: "#8A94B8", W: "#F4F6FF", Y: "#FFC933",
+    G: "#7A4A24", C: "#3CE0FF", Z: "#7A4DFF",
+  };
+}
+
+// The hero's body and gear, without the weapon. Coordinates: hand at (12, 9).
+function heroBodySVG(h) {
+  const pal = heroPalette(h);
+  // A hat sits on a plain head; spikes would poke through it.
+  const style = h.hat !== "none" && h.hairStyle === "spiky" ? "short" : h.hairStyle;
+  const head = HERO_HEADS[style] || HERO_HEADS.short;
+  const hat = HERO_HATS[h.hat];
+  return pixelRects(HERO_BODY, pal, 0, 8) +
+    pixelRects(head.rows, pal, 0, head.y) +
+    (hat ? pixelRects(hat.rows, pal, 0, hat.y) : "");
+}
+
+function heroWeaponSVG(h) {
+  const w = HERO_WEAPONS[h.weapon] || HERO_WEAPONS.sword;
+  const width = w.rows[0].length, height = w.rows.length;
+  // Rotate about the grip, so a swing pivots in the hand.
+  const origin = ((w.gx + 0.5) / width * 100).toFixed(1) + "% " + ((w.gy + 0.5) / height * 100).toFixed(1) + "%";
+  return '<g class="weapon-swing" style="transform-origin:' + origin + '">' +
+    pixelRects(w.rows, heroPalette(h), 12 - w.gx, 9 - w.gy) + "</g>";
+}
+
+// The hero on their own, for the customiser and the Personal tab.
+function heroPortrait(h) {
+  return '<svg class="hero-portrait" viewBox="-2 -7 22 25" shape-rendering="crispEdges" role="img" aria-label="' +
+    esc(heroName(h)) + ', your hero">' + heroBodySVG(h) + heroWeaponSVG(h) + "</svg>";
+}
+
+const SLIME_ROWS = [
+  ".....KKKK.....",
+  "...KKGGGGKK...",
+  "..KGGwGGGGGK..",
+  ".KGwwGGGGGGGK.",
+  ".KGGGGGGGGGGK.",
+  "KGGGGGGGGGGGGK",
+  "KGGGGGGGGGGGGK",
+  "KgGGGGGGGGGGgK",
+  ".KggggggggggK.",
+  "..KKKKKKKKKK.."];
+
+/* A different slime each day, so a new day looks like a new fight. */
+const SLIMES = [["Green", "#5BD46A"], ["Blue", "#4FB3FF"], ["Pink", "#FF7AB6"],
+                ["Purple", "#B07BFF"], ["Orange", "#FFB347"]];
+
+function slimeOfDay(iso) {
+  const n = iso.split("-").reduce((s, v) => s + Number(v), 0);
+  return SLIMES[n % SLIMES.length];
+}
+
+function slimeSVG(color) {
+  const pal = { K: "#14142B", G: color, g: shade(color, 0.22), w: "#FFFFFF" };
+  return pixelRects(SLIME_ROWS, pal, 0, 0) +
+    '<g class="slime-eyes"><rect x="4" y="4" width="1" height="2" fill="#14142B"/>' +
+    '<rect x="8" y="4" width="1" height="2" fill="#14142B"/>' +
+    '<rect x="5" y="6" width="2" height="1" fill="#14142B"/></g>' +
+    '<g class="slime-shut"><rect x="3" y="5" width="2" height="1" fill="#14142B"/>' +
+    '<rect x="7" y="5" width="2" height="1" fill="#14142B"/></g>';
+}
+
+/* Today's quests, worked out once and shared by the quest list and the battle:
+   your picks, or the soonest-due task when nothing is picked, plus what you
+   finished today. */
+function todaysQuests() {
+  const todos = DB.todos || [];
+  const today = todayISO();
+  const picked = todos.filter((t) => t.top && !t.done).sort((a, b) => a.topRank - b.topRank);
+  const doneToday = todos.filter((t) => t.done && t.doneAt === today);
+  let fallback = null;
+  if (!picked.length) {
+    const dated = todos.filter((t) => !t.done && !t.top && t.due).sort((a, b) => a.due.localeCompare(b.due));
+    fallback = dated[0] || null;
+  }
+  const quests = fallback ? [fallback] : picked;
+  return { picked, doneToday, fallback, quests, total: quests.length + doneToday.length };
+}
+
+// The slime's health is the XP still on the table today.
+function battleState(q) {
+  const maxHP = q.quests.concat(q.doneToday).reduce((s, t) => s + taskXP(t), 0);
+  const hp = q.quests.reduce((s, t) => s + taskXP(t), 0);
+  return { maxHP, hp, won: maxHP > 0 && hp === 0, asleep: maxHP === 0 };
+}
+
+function battleCard(q, level) {
+  const h = heroOf();
+  const b = battleState(q);
+  const [slimeName, slimeColor] = slimeOfDay(todayISO());
+  const pct = b.maxHP ? Math.round(b.hp / b.maxHP * 100) : 0;
+  const caption = b.asleep
+    ? "The slime is asleep. Pick a quest and it wakes up."
+    : b.won ? "Slime defeated! Every quest is done today."
+    : "Finish a quest to strike. Each hit does its XP in damage.";
+  return '<section class="card battle' + (b.won ? " won" : "") + (b.asleep ? " asleep" : "") + '" id="battle">' +
+    '<div class="battle-stage">' +
+    '<svg class="battle-svg" viewBox="0 -7 64 27" shape-rendering="crispEdges" aria-hidden="true">' +
+    '<rect class="ground-line" x="0" y="17" width="64" height="1"/>' +
+    '<rect class="ground" x="0" y="18" width="64" height="3"/>' +
+    '<g transform="translate(6 0)"><g class="hero-anim">' + heroBodySVG(h) + heroWeaponSVG(h) + "</g></g>" +
+    '<g transform="translate(43 7)"><g class="slime-anim">' + slimeSVG(slimeColor) + "</g></g>" +
+    "</svg>" +
+    '<div class="dmg" aria-hidden="true"></div>' +
+    '<div class="zzz" aria-hidden="true">z<span>z</span><span>Z</span></div>' +
+    '<div class="victory" aria-hidden="true">Victory!</div>' +
+    "</div>" +
+    '<div class="battle-info">' +
+    '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong> <span class=\"lv\">Lv " + level + "</span>" +
+    ' <span class="vs">vs</span> <strong>' + slimeName + " Slime</strong></p>" +
+    (b.asleep ? "" :
+      '<div class="meter meter-hp" role="progressbar" aria-label="Slime health" aria-valuemin="0" aria-valuemax="' +
+      b.maxHP + '" aria-valuenow="' + b.hp + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
+      '<p class="battle-hp"><strong>' + b.hp + " / " + b.maxHP + "</strong> HP</p>") +
+    '<p class="battle-caption" role="status">' + caption + "</p>" +
+    '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button>' +
+    "</div></section>";
+}
+
+// The strike itself, played after a quest is ticked off.
+function playStrike(xp) {
+  const card = $("#battle");
+  if (!card) return;
+  card.classList.remove("attack", "finishing");
+  void card.offsetWidth;                 // restart the animation on a quick second tick
+  card.classList.add("attack");
+  if (card.classList.contains("won")) card.classList.add("finishing");
+  const dmg = card.querySelector(".dmg");
+  if (dmg) {
+    dmg.textContent = "−" + xp;
+    dmg.classList.remove("show");
+    void dmg.offsetWidth;
+    dmg.classList.add("show");
+  }
+  setTimeout(() => card.classList.remove("attack"), 700);
+}
+
+/* ---------- the customiser ---------- */
+
+function heroEditor() {
+  state.heroDraft = heroOf();
+  const h = state.heroDraft;
+  const group = (key, label, swatch) =>
+    '<div class="field"><label>' + label + '</label><div class="opts" role="group" aria-label="' + label + '">' +
+    HERO_OPTIONS[key].map((o, i) => {
+      const val = swatch ? i : o[1];
+      return '<button type="button" class="opt" data-act="hero-opt" data-key="' + key + '" data-val="' + val +
+        '" aria-pressed="' + (h[key] === val) + '">' +
+        (swatch ? '<span class="swatch-dot" style="background:' + o[1] + '"></span>' : "") + esc(o[0]) + "</button>";
+    }).join("") + "</div></div>";
+  openModal("Customize your hero",
+    '<form id="hero-form" class="hero-editor">' +
+    '<div class="hero-preview" id="hero-preview">' + heroPortrait(h) + "</div>" +
+    '<div class="field"><label>Name <span class="hint">leave blank to use your first name</span></label>' +
+    '<input name="name" maxlength="24" value="' + esc(h.name) + '" placeholder="' + esc(firstName() || "Hero") + '"></div>' +
+    group("weapon", "Weapon") + group("hat", "Headgear") + group("hairStyle", "Hair") +
+    group("hairColor", "Hair colour", true) + group("skin", "Skin tone", true) + group("outfit", "Outfit", true) +
+    "</form>",
+    '<button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="hero-save">Save hero</button>',
+    { noFocus: true });
+}
+
+function heroPick(key, raw) {
+  const h = state.heroDraft;
+  if (!h) return;
+  h[key] = /^\d+$/.test(raw) ? Number(raw) : raw;
+  $("#hero-preview").innerHTML = heroPortrait(h);
+  $$('.opt[data-key="' + key + '"]').forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.val === String(raw))));
+}
+
+function heroSave() {
+  const h = state.heroDraft || heroOf();
+  h.name = String(formValues($("#hero-form")).name || "").trim().slice(0, 24);
+  DB.game = DB.game || { bankedXP: 0, bankedDays: [] };
+  DB.game.hero = h;
+  state.heroDraft = null;
+  save(); closeModal(); render();
+}
+
+/* ============================================================
+   PERSONAL: a playbook for an ADHD brain
+   Short methods with a source each, and an honest word on how strong the evidence
+   is. Every one can go straight into the quest log as a small first step.
+   ============================================================ */
+
+const EVIDENCE = {
+  strong: "Strong evidence",
+  good: "Good evidence",
+  expert: "Expert-backed",
+  early: "Early research",
+};
+
+const PLAYBOOK = [
+  { id: "tiny-step", tag: "Getting started", icon: "🪶", evidence: "strong",
+    title: "Shrink the first step",
+    what: "Big tasks stall because the brain can't see where to start. Rewrite the task as its tiniest possible first move: not “update portfolio” but “open the portfolio folder”. Small enough to feel almost silly.",
+    why: "Breaking avoided tasks into small, concrete steps is a core skill in CBT for adult ADHD. In a randomized trial it cut symptoms well beyond what medication alone did.",
+    src: ["Safren et al., JAMA 2010", "https://pubmed.ncbi.nlm.nih.gov/20736471/"],
+    quest: "Pick one big task and write down its tiniest first step" },
+  { id: "if-then", tag: "Getting started", icon: "🔀", evidence: "good",
+    title: "Write if-then plans",
+    what: "Decide the trigger ahead of time: “If I sit down after lunch, then I open the edit queue.” The cue does the deciding, so you don’t have to start from willpower.",
+    why: "If-then plans (“implementation intentions”) help goal follow-through across hundreds of studies, and they helped children with ADHD hold back impulses in lab tasks.",
+    src: ["Gawrilow & Gollwitzer, 2008", "https://link.springer.com/article/10.1007/s10608-007-9150-1"],
+    quest: "Write one if-then plan for tomorrow" },
+  { id: "parking-lot", tag: "Focus", icon: "🅿️", evidence: "good",
+    title: "Park distractions, don’t chase them",
+    what: "Start a timer. When a thought pops up (email that client, check that lineup), write it on a notepad and keep going. When the timer ends, sort the list: do now, add as a quest, or let go.",
+    why: "This “distractibility delay” is part of the CBT program for adult ADHD tested by Safren and colleagues.",
+    src: ["CHADD: Mastering Your Adult ADHD", "https://chadd.org/attention-article/mastering-your-adult-adhd/"],
+    quest: "Do one timed focus block with a distraction notepad" },
+  { id: "focus-span", tag: "Focus", icon: "⏱️", evidence: "good",
+    title: "Size quests to your real focus span",
+    what: "Time how long you actually stay on a boring task before drifting. Maybe it’s 12 minutes, and that’s fine. Then cut work into chunks that size. A quest you can finish beats one you abandon.",
+    why: "The same CBT program starts by measuring your realistic attention span, then chunking tasks to fit it.",
+    src: ["Safren et al. 2010 (full text)", "https://pmc.ncbi.nlm.nih.gov/articles/PMC3641654/"],
+    quest: "Time how long you can focus on one boring task" },
+  { id: "see-time", tag: "Time", icon: "⌛", evidence: "expert",
+    title: "Make time visible",
+    what: "ADHD can make time feel invisible: it’s either “now” or “not now”. Use a timer you can see counting down, an analog clock in view, and alarms for transitions (“leave for the shoot in 15”).",
+    why: "Russell Barkley’s model of ADHD as a problem of self-regulation recommends putting time outside your head, where you can see it.",
+    src: ["Barkley: Executive functioning & ADHD", "https://www.russellbarkley.org/factsheets/ADHD_EF_and_SR.pdf"],
+    quest: "Put a visible countdown timer where you work" },
+  { id: "launch-pad", tag: "Time", icon: "🎒", evidence: "expert",
+    title: "Put reminders where the action happens",
+    what: "A reminder in an app is easy to miss. Put the cue at the spot you’ll be standing: a launch pad by the door with charged batteries, cards and the shot list for tomorrow’s gig.",
+    why: "Barkley calls this working at the “point of performance”: cues in the environment beat cues you have to remember.",
+    src: ["Barkley: Executive functioning & ADHD", "https://www.russellbarkley.org/factsheets/ADHD_EF_and_SR.pdf"],
+    quest: "Set up a launch pad by the door for shoot gear" },
+  { id: "instant-reward", tag: "Motivation", icon: "🍬", evidence: "good",
+    title: "Make rewards instant",
+    what: "A reward next month barely registers. Give yourself something small right after finishing: a coffee, a song, five minutes of something fun. (It’s why this tracker pops XP the moment you tick something off.)",
+    why: "Research consistently finds people with ADHD favour small immediate rewards over bigger delayed ones, and that rewards boost their performance. Most of it was done with children.",
+    src: ["Luman et al., Clin Psych Review 2005", "https://www.sciencedirect.com/science/article/abs/pii/S0272735804001527"],
+    quest: "Choose a small reward for finishing today’s first quest" },
+  { id: "bundle", tag: "Motivation", icon: "🎧", evidence: "good",
+    title: "Bundle the boring with something you love",
+    what: "Only allow a favourite podcast, playlist or show while doing the dreaded thing: culling a gallery, doing expenses. Then you want to start.",
+    why: "In a field experiment, keeping gripping audiobooks for the gym raised gym visits by about half. The effect faded over time, so swap bundles when one goes stale.",
+    src: ["Milkman, Minson & Volpp, 2014", "https://dl.acm.org/doi/abs/10.1287/mnsc.2013.1784"],
+    quest: "Pick a podcast you only allow while editing" },
+  { id: "body-double", tag: "Focus", icon: "👥", evidence: "early",
+    title: "Work next to someone",
+    what: "“Body doubling”: do your task while someone else is around doing theirs, in person, on a video call or in an online focus room. They don’t help; they’re just there.",
+    why: "Many people with ADHD swear by it, but proper studies only began in 2024. Results so far are promising, not proven.",
+    src: ["EEG study of body doubling, 2025", "https://dl.acm.org/doi/full/10.1145/3663547.3759743"],
+    quest: "Set up one co-working session with a friend" },
+  { id: "move-first", tag: "Body", icon: "🏃", evidence: "good",
+    title: "Move before the hard thing",
+    what: "A short burst of exercise (a brisk walk, a few minutes of anything that gets your heart going) before a tough task can make it easier to lock in.",
+    why: "Meta-analyses find exercise improves executive function in ADHD. Most of the research is in children and teens, with less on adults so far.",
+    src: ["Network meta-analysis, 2023", "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10080114/"],
+    quest: "Take a 10-minute walk before your hardest quest" },
+  { id: "forgive", tag: "Bounce back", icon: "🫂", evidence: "good",
+    title: "Forgive the slip",
+    what: "Missed a day? Put something off for a week? Beating yourself up makes the task feel worse, so you avoid it more. Name it, let it go, and start the next small step.",
+    why: "Students who forgave themselves for procrastinating before one exam procrastinated less before the next.",
+    src: ["Wohl, Pychyl & Bennett, 2010", "https://www.researchgate.net/publication/222302476_I_forgive_myself_now_I_can_study_How_self-forgiveness_for_procrastinating_can_reduce_future_procrastination"],
+    quest: "Write one line letting yourself off the hook for something" },
+  { id: "fresh-start", tag: "Bounce back", icon: "🌅", evidence: "good",
+    title: "Use fresh starts",
+    what: "Mondays, the first of the month, the day after a big gig: these feel like a clean page. Use them to restart a habit. A streak that resets is just a new fresh start.",
+    why: "People are measurably more likely to start goals right after “temporal landmarks” like a new week, month or birthday.",
+    src: ["Dai, Milkman & Riis, 2014", "https://pubsonline.informs.org/doi/10.1287/mnsc.2014.1901"],
+    quest: "Plan next Monday’s first quest" },
+  { id: "get-support", tag: "Support", icon: "🤝", evidence: "strong",
+    title: "Get backup from a pro",
+    what: "CBT built for adult ADHD, ADHD coaching and medication are the best-studied supports, and they work together. A clinician can help you work out what fits you.",
+    why: "In the trial above, adding CBT to medication cut symptoms by 30% or more for two thirds of people, against one third with relaxation training.",
+    src: ["Safren et al., JAMA 2010", "https://jamanetwork.com/journals/jama/fullarticle/186469"],
+    quest: "Look up an ADHD-informed therapist or coach" },
+];
+
+const PLAYBOOK_TAGS = ["All"].concat(PLAYBOOK.map((p) => p.tag)
+  .filter((t, i, a) => a.indexOf(t) === i));
+
+// One featured pick a day, the same all day.
+function tipOfDay() {
+  const d = new Date();
+  const n = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  return PLAYBOOK[n % PLAYBOOK.length];
+}
+
+function playbookCard(p, featured) {
+  const added = state.addedTips && state.addedTips[p.id];
+  return '<article class="card tip' + (featured ? " tip-featured on-yellow" : "") + '">' +
+    '<div class="tip-top"><span class="tip-icon" aria-hidden="true">' + p.icon + "</span>" +
+    '<span class="tag">' + esc(p.tag) + "</span>" +
+    '<span class="tag tag-ev ev-' + p.evidence + '">' + EVIDENCE[p.evidence] + "</span></div>" +
+    "<h3>" + esc(p.title) + "</h3>" +
+    '<p class="tip-what">' + esc(p.what) + "</p>" +
+    '<p class="tip-why"><strong>Why it works:</strong> ' + esc(p.why) + ' <a href="' + p.src[1] +
+      '" target="_blank" rel="noopener">' + esc(p.src[0]) + " ↗</a></p>" +
+    '<button class="btn btn-sm' + (added ? "" : " btn-primary") + '" data-act="playbook-quest" data-id="' + p.id + '"' +
+      (added ? " disabled" : "") + ">" +
+    (added ? "✓ Added to your quest log" : "＋ Add as a quest: " + esc(p.quest)) + "</button>" +
+    "</article>";
+}
+
+VIEWS.personal = function () {
+  const h = heroOf();
+  const g = gameStats();
+  const tag = state.playbookTag || "All";
+  const tip = tipOfDay();
+  let html = "";
+
+  html += '<section class="card hero-card">' + heroPortrait(h) +
+    '<div class="hero-card-text"><h1>' + esc(heroName(h)) + "</h1>" +
+    '<p>Level ' + g.level + " · " + g.totalXP.toLocaleString() + " XP · " +
+      (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
+    '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button></div></section>';
+
+  html += '<h2 class="section-head">Today’s power-up</h2>' + playbookCard(tip, true);
+
+  html += '<h2 class="section-head">The playbook</h2>' +
+    '<p class="page-lede">Tricks for getting things done with an ADHD brain. Each has a source, and an honest note on how solid the evidence is. Try one at a time.</p>' +
+    '<div class="chips" role="group" aria-label="Filter tips">' +
+    PLAYBOOK_TAGS.map((t) => '<button class="chip' + (t === tag ? " active" : "") + '" data-act="playbook-tag" data-tag="' +
+      esc(t) + '" aria-pressed="' + (t === tag) + '">' + esc(t) + "</button>").join("") + "</div>";
+
+  html += '<div class="tips">' + PLAYBOOK.filter((p) => tag === "All" || p.tag === tag)
+    .map((p) => playbookCard(p, false)).join("") + "</div>";
+
+  html += '<p class="fine-print">General self-help ideas, not medical advice. If ADHD is getting in the way, a doctor or an ADHD-informed therapist can help you find what works for you.</p>';
+  return html;
+};
+
+function addPlaybookQuest(id) {
+  const p = PLAYBOOK.find((x) => x.id === id);
+  if (!p) return;
+  DB.todos = DB.todos || [];
+  DB.todos.push({ id: uid(), text: p.quest, done: false, created: todayISO(), doneAt: null,
+                  top: false, topRank: null, category: "", due: "", notes: p.title, xp: DEFAULT_XP });
+  state.addedTips = state.addedTips || {};
+  state.addedTips[id] = true;
+  save();
+  render();
+}
+
 VIEWS.today = function () {
   const g = gameStats();
   const s = GAME_SAMPLE;
@@ -1391,18 +1882,14 @@ VIEWS.today = function () {
       g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
     "</section>";
 
-  /* ---- today's quests: your Top 3 picks, plus what you finished today ---- */
-  const picked = todos.filter((t) => t.top && !t.done).sort((a, b) => a.topRank - b.topRank);
-  const doneToday = todos.filter((t) => t.done && t.doneAt === today);
-  /* Nothing picked for today? Up next falls back to the open task due soonest, so
-     there is always one obvious place to start. */
-  let fallback = null;
-  if (!picked.length) {
-    const dated = todos.filter((t) => !t.done && !t.top && t.due).sort((a, b) => a.due.localeCompare(b.due));
-    fallback = dated[0] || null;
-  }
-  const quests = (fallback ? [fallback] : picked);
-  const total = quests.length + doneToday.length;
+  /* ---- today's quests: your Top 3 picks, plus what you finished today.
+     Nothing picked? Up next falls back to the open task due soonest, so there is
+     always one obvious place to start. ---- */
+  const q = todaysQuests();
+  const { picked, doneToday, fallback, quests, total } = q;
+
+  /* ---- the battle: today's quests are the slime's health ---- */
+  html += battleCard(q, g.level);
 
   html += '<div class="play-cols"><div class="play-main">';
   html += '<div class="quest-head"><h2>Today’s quests</h2>' +
@@ -5062,6 +5549,11 @@ document.addEventListener("click", (e) => {
       save(); closeModal(); render();
       break;
     case "toggle-todo": toggleTodo(id); break;
+    case "hero-edit": heroEditor(); break;
+    case "hero-opt": heroPick(el.dataset.key, el.dataset.val); break;
+    case "hero-save": heroSave(); break;
+    case "playbook-tag": state.playbookTag = el.dataset.tag; render(); break;
+    case "playbook-quest": addPlaybookQuest(id); break;
     case "delete-todo":
       e.preventDefault();
       bankXP((DB.todos || []).filter((x) => x.id === id));
