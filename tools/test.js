@@ -101,6 +101,7 @@ let app = read("app.js").replace(
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
   "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
   "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, slimeOfDay,\n" +
+  "  slimeFor, SLIMES, VIEWS, CHANGELOG,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1041,6 +1042,36 @@ t("every playbook tip has a real source link, an evidence rating and a quest", (
     if (!/^https:\/\//.test(p.src[1])) throw new Error(p.id + ": source is not an https link");
     if (!T.EVIDENCE[p.evidence]) throw new Error(p.id + ": unknown evidence level " + p.evidence);
     if (!p.quest || !p.what || !p.why) throw new Error(p.id + ": missing text");
+  });
+});
+
+t("a picked slime colour sticks; 'changes daily' follows the date", () => {
+  eq(T.slimeFor({ slime: 3 }, "2026-10-01")[0], T.SLIMES[2][0], "option 3 is the third colour");
+  eq(T.slimeFor({ slime: 0 }, "2026-10-01")[0], T.slimeOfDay("2026-10-01")[0], "0 is daily");
+  eq(T.slimeFor({}, "2026-10-01")[0], T.slimeOfDay("2026-10-01")[0], "unset is daily");
+});
+
+t("a quest finished today leaves the quest list but still counts", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
+  const today = T.isoOf(new Date());
+  db.todos = [
+    { id: "a", text: "Still to do", done: false, top: true, topRank: 0 },
+    { id: "b", text: "Finished earlier", done: true, doneAt: today },
+  ];
+  T.setDB(db);
+  T.setState({ view: "today", showDone: false });
+  const html = T.VIEWS.today();
+  if (html.indexOf("Finished earlier") >= 0) throw new Error("finished quest still on screen");
+  if (html.indexOf("Still to do") < 0) throw new Error("open quest missing");
+  if (html.indexOf("1 of 2 done") < 0) throw new Error("counter should still read 1 of 2 done");
+});
+
+t("the update log is newest first and every entry says what was asked and what changed", () => {
+  T.CHANGELOG.forEach((e, i) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date)) throw new Error("bad date: " + e.date);
+    if (!e.asked || !e.changed.length || !e.title) throw new Error("incomplete entry: " + e.title);
+    if (i && e.date > T.CHANGELOG[i - 1].date) throw new Error("out of order: " + e.title);
   });
 });
 

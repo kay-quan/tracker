@@ -1385,6 +1385,11 @@ function nudges() {
    one character per pixel, so they stay sharp at any size.
    ============================================================ */
 
+/* Slime colours. Left on "changes daily", each day brings a different one. */
+const SLIMES = [["Green", "#5BD46A"], ["Blue", "#4FB3FF"], ["Pink", "#FF7AB6"],
+                ["Purple", "#B07BFF"], ["Orange", "#FFB347"], ["Red", "#FF5A4E"],
+                ["Gold", "#FFD23F"], ["Teal", "#2EC4B6"]];
+
 const HERO_OPTIONS = {
   skin: [["Porcelain", "#FFE3CC"], ["Peach", "#F2C291"], ["Tan", "#D99B6C"],
          ["Bronze", "#A86B45"], ["Deep", "#6E4630"]],
@@ -1395,10 +1400,11 @@ const HERO_OPTIONS = {
   outfit: [["Blue", "#2F4BFF"], ["Red", "#E5484D"], ["Green", "#2BB673"],
            ["Purple", "#7A4DFF"], ["Orange", "#FF9F1C"], ["Slate", "#4A5080"]],
   weapon: [["Sword", "sword"], ["Axe", "axe"], ["Staff", "staff"], ["Hammer", "hammer"]],
+  slime: [["Changes daily", "daily"]].concat(SLIMES),
 };
 
 const HERO_DEFAULT = { name: "", skin: 1, hairColor: 1, hairStyle: "short", hat: "none",
-                       outfit: 0, weapon: "sword" };
+                       outfit: 0, weapon: "sword", slime: 0 };
 
 function heroOf() {
   return Object.assign({}, HERO_DEFAULT, (DB.game && DB.game.hero) || {});
@@ -1549,7 +1555,15 @@ function heroWeaponSVG(h) {
     pixelRects(w.rows, heroPalette(h), 12 - w.gx, 9 - w.gy) + "</g>";
 }
 
-// The hero on their own, for the customiser and the Personal tab.
+// Hero and slime side by side, for the customiser.
+function matchupPreview(h) {
+  return '<svg class="hero-portrait" viewBox="-2 -7 40 25" shape-rendering="crispEdges" role="img" aria-label="' +
+    esc(heroName(h)) + " and the " + esc(slimeFor(h, todayISO())[0]) + ' slime">' +
+    heroBodySVG(h) + heroWeaponSVG(h) + '<g transform="translate(21 7)">' +
+    slimeSVG(slimeFor(h, todayISO())[1]) + "</g></svg>";
+}
+
+// The hero on their own, for the Personal tab.
 function heroPortrait(h) {
   return '<svg class="hero-portrait" viewBox="-2 -7 22 25" shape-rendering="crispEdges" role="img" aria-label="' +
     esc(heroName(h)) + ', your hero">' + heroBodySVG(h) + heroWeaponSVG(h) + "</svg>";
@@ -1567,13 +1581,14 @@ const SLIME_ROWS = [
   ".KggggggggggK.",
   "..KKKKKKKKKK.."];
 
-/* A different slime each day, so a new day looks like a new fight. */
-const SLIMES = [["Green", "#5BD46A"], ["Blue", "#4FB3FF"], ["Pink", "#FF7AB6"],
-                ["Purple", "#B07BFF"], ["Orange", "#FFB347"]];
-
 function slimeOfDay(iso) {
   const n = iso.split("-").reduce((s, v) => s + Number(v), 0);
-  return SLIMES[n % SLIMES.length];
+  return SLIMES.slice(0, 5)[n % 5];
+}
+
+// The slime you picked, or today's if you left it to chance (option 0).
+function slimeFor(h, iso) {
+  return SLIMES[num(h.slime) - 1] || slimeOfDay(iso);
 }
 
 function slimeSVG(color) {
@@ -1613,7 +1628,7 @@ function battleState(q) {
 function battleCard(q, level) {
   const h = heroOf();
   const b = battleState(q);
-  const [slimeName, slimeColor] = slimeOfDay(todayISO());
+  const [slimeName, slimeColor] = slimeFor(h, todayISO());
   const pct = b.maxHP ? Math.round(b.hp / b.maxHP * 100) : 0;
   const caption = b.asleep
     ? "The slime is asleep. Pick a quest and it wakes up."
@@ -1672,15 +1687,17 @@ function heroEditor() {
       const val = swatch ? i : o[1];
       return '<button type="button" class="opt" data-act="hero-opt" data-key="' + key + '" data-val="' + val +
         '" aria-pressed="' + (h[key] === val) + '">' +
-        (swatch ? '<span class="swatch-dot" style="background:' + o[1] + '"></span>' : "") + esc(o[0]) + "</button>";
+        (swatch ? '<span class="swatch-dot' + (o[1] === "daily" ? " swatch-daily" : "") + '"' +
+          (o[1] === "daily" ? "" : ' style="background:' + o[1] + '"') + "></span>" : "") + esc(o[0]) + "</button>";
     }).join("") + "</div></div>";
-  openModal("Customize your hero",
+  openModal("Customize your hero and rival",
     '<form id="hero-form" class="hero-editor">' +
-    '<div class="hero-preview" id="hero-preview">' + heroPortrait(h) + "</div>" +
+    '<div class="hero-preview" id="hero-preview">' + matchupPreview(h) + "</div>" +
     '<div class="field"><label>Name <span class="hint">leave blank to use your first name</span></label>' +
     '<input name="name" maxlength="24" value="' + esc(h.name) + '" placeholder="' + esc(firstName() || "Hero") + '"></div>' +
     group("weapon", "Weapon") + group("hat", "Headgear") + group("hairStyle", "Hair") +
     group("hairColor", "Hair colour", true) + group("skin", "Skin tone", true) + group("outfit", "Outfit", true) +
+    '<h3 class="editor-sub">Your rival</h3>' + group("slime", "Slime colour", true) +
     "</form>",
     '<button class="btn" data-act="close-modal">Cancel</button>' +
     '<button class="btn btn-primary" data-act="hero-save">Save hero</button>',
@@ -1691,7 +1708,7 @@ function heroPick(key, raw) {
   const h = state.heroDraft;
   if (!h) return;
   h[key] = /^\d+$/.test(raw) ? Number(raw) : raw;
-  $("#hero-preview").innerHTML = heroPortrait(h);
+  $("#hero-preview").innerHTML = matchupPreview(h);
   $$('.opt[data-key="' + key + '"]').forEach((b) =>
     b.setAttribute("aria-pressed", String(b.dataset.val === String(raw))));
 }
@@ -1825,6 +1842,62 @@ function playbookCard(p, featured) {
     "</article>";
 }
 
+/* ---------- the update log ----------
+   Newest first. Every change that ships adds an entry here: what was asked for,
+   and what changed. This repo is public, so keep the wording neutral. */
+const CHANGELOG = [
+  { date: "2026-10-01", title: "An update log",
+    asked: "A log on the Personal tab showing what was asked for before each update, to read back later.",
+    changed: [
+      "This Update log: every change from now on is listed here, newest first.",
+      "Updates now go live as soon as they're finished, without a separate “make it live” step.",
+    ] },
+  { date: "2026-10-01", title: "Tidier quests, your own slime, a smaller layout",
+    asked: "Finished tasks should leave the list instead of staying crossed out. Let me pick the slime’s colour. Everything feels too big: zoom out a little so it isn’t as wide.",
+    changed: [
+      "Ticking a quest off moves it straight to Completed. The counter and the slime’s health still count it, and Restore puts it back.",
+      "The customizer has a “Your rival” section: keep “Changes daily” or pick one of eight slime colours.",
+      "On a computer every tab draws at 85% and the page is narrower. Phones stay full size so buttons are easy to tap.",
+    ] },
+  { date: "2026-10-01", title: "Hero vs slime, and the Personal tab",
+    asked: "A Personal tab with researched ways to stay productive. A little swordsman fighting a slime on Today to make it feel more like a game, with a customizable character.",
+    changed: [
+      "Personal tab: your hero card, a daily power-up, and a playbook of 13 methods, each with a source, an evidence rating and an “Add as a quest” button.",
+      "Today has a battle: the slime’s health is the XP of today’s quests, every finished quest is a hit, and clearing them all wins.",
+      "Customize your hero: name, weapon, headgear, hair, skin tone and outfit.",
+    ] },
+  { date: "2026-10-01", title: "The Chunky Arcade makeover, with XP and streaks",
+    asked: "Turn the tracker into a gamified dashboard you actually want to open: instant rewards, visible progress, very easy to read. Bold outlines, big type, XP, levels and a streak.",
+    changed: [
+      "A new look on every tab, with a matching dark mode.",
+      "Today became a quest dashboard: the Top 3 are today’s quests with an “Up next” highlight, and the rest is the quest log.",
+      "Finished tasks earn XP (20 each, or set your own). Every 500 XP is a level, and the streak counts days in a row with a finished quest.",
+      "Ticking a task off pops the check and floats “+XP”; a new level gets a short celebration.",
+    ] },
+];
+
+function changelogEntry(e) {
+  return '<article class="card log-entry">' +
+    '<div class="log-head"><time datetime="' + e.date + '">' +
+      esc(fmtDate(e.date, { month: "short", day: "numeric", year: "numeric" })) + "</time>" +
+      "<h3>" + esc(e.title) + "</h3></div>" +
+    '<p class="log-asked"><strong>You asked for:</strong> ' + esc(e.asked) + "</p>" +
+    '<p class="log-label">What changed</p><ul class="log-changed">' +
+    e.changed.map((c) => "<li>" + esc(c) + "</li>").join("") + "</ul></article>";
+}
+
+// The two newest stay open; older ones fold away so the tab doesn't grow forever.
+function changelogHTML() {
+  const recent = CHANGELOG.slice(0, 2), older = CHANGELOG.slice(2);
+  return '<h2 class="section-head">Update log</h2>' +
+    '<p class="page-lede">What you asked for, and what changed, newest first.</p>' +
+    recent.map(changelogEntry).join("") +
+    (older.length
+      ? '<details class="log-older"><summary>Older updates <span class="count">' + older.length +
+        "</span></summary>" + older.map(changelogEntry).join("") + "</details>"
+      : "");
+}
+
 VIEWS.personal = function () {
   const h = heroOf();
   const g = gameStats();
@@ -1850,6 +1923,8 @@ VIEWS.personal = function () {
     .map((p) => playbookCard(p, false)).join("") + "</div>";
 
   html += '<p class="fine-print">General self-help ideas, not medical advice. If ADHD is getting in the way, a doctor or an ADHD-informed therapist can help you find what works for you.</p>';
+
+  html += changelogHTML();
   return html;
 };
 
@@ -1907,7 +1982,11 @@ VIEWS.today = function () {
       '<span class="drag-hint"> · drag one here or click</span></span></div>';
   }
 
-  doneToday.forEach((t) => { html += questCard(t, {}); });
+  /* Finished quests leave the list straight away and go to Completed below; the
+     counter and the slime keep score. */
+  if (!quests.length && doneToday.length) {
+    html += '<p class="quests-clear">\ud83c\udf89 All of today\u2019s quests are done. Nice work.</p>';
+  }
 
   /* ---- the quest log: everything else ---- */
   const open = todos.filter((t) => !t.done && !t.top && t !== fallback);

@@ -3079,3 +3079,41 @@ td input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--prima
   .tab-label { font-size: 11.5px; }
 }
 .hero-editor .hero-preview { width: 180px; }
+
+/* Finished quests move to Completed; this line takes their place when all are done. */
+.quests-clear {
+  font-family: var(--game); font-weight: 600; font-size: 22px;
+  margin: 0 0 18px; padding: 16px 20px;
+  border: var(--line) dashed var(--ink-2); border-radius: var(--radius);
+}
+.hero-editor .hero-preview { width: 280px; max-width: 100%; }
+.editor-sub { font-size: 22px; margin: 28px 0 12px; padding-top: 18px; border-top: 2px solid var(--border); }
+.swatch-daily { background: conic-gradient(#5BD46A, #4FB3FF, #B07BFF, #FF7AB6, #FFB347, #5BD46A); }
+
+/* ---------- overall size ----------
+   On a computer screen everything is drawn at 85%: the same layout, just less
+   of it filling the screen. Phones keep full size so buttons stay easy to tap.
+   To change it, edit the number below (1 = full size). */
+@media (min-width: 761px) {
+  .appbar-inner, main, .tabbar, .modal, .levelup-card { zoom: 0.85; }
+}
+
+/* ---------- Personal: the update log ---------- */
+.log-entry { padding: 18px 22px; margin-bottom: 18px; }
+.log-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.log-head time {
+  font-family: var(--game); font-weight: 600; font-size: 15px;
+  padding: 2px 12px; border: 2px solid var(--outline); border-radius: 999px; background: var(--yellow); color: #14142B;
+}
+.log-head h3 { font-size: 23px; margin: 0; }
+.log-asked { margin: 0 0 12px; font-size: 18px; color: var(--ink-2); }
+.log-asked strong { color: var(--ink); }
+.log-label { margin: 0 0 4px; font-family: var(--game); font-weight: 600; font-size: 15px;
+             letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); }
+.log-changed { margin: 0; padding-left: 22px; font-size: 18px; }
+.log-changed li { margin-bottom: 4px; }
+.log-older > summary {
+  cursor: pointer; font-family: var(--game); font-weight: 600; font-size: 20px;
+  min-height: 44px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.fine-print { margin-bottom: 8px; }
