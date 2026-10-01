@@ -958,15 +958,27 @@ function setGoalDialog() {
     '<button class="btn btn-primary" data-act="save-goal">Save</button>');
 }
 
-// Put a task into a Top 3 slot. Whatever was in that slot gets bumped back to
-// the list, so a slot always holds exactly one thing.
+/* Put a task into a Top 3 slot. A slot holds exactly one task, so whatever was
+   there moves rather than being dropped:
+   - dragging one of today's quests onto another swaps the two;
+   - bringing a task in from the quest log moves the occupant to a free slot,
+     and only goes back to the log when all three slots are full. */
 function assignTop(taskId, rank) {
-  const t = (DB.todos || []).find((x) => x.id === taskId);
+  const todos = DB.todos || [];
+  const t = todos.find((x) => x.id === taskId);
   if (!t) return;
-  (DB.todos || []).forEach((x) => {
-    if (x !== t && x.top && !x.done && x.topRank === rank) { x.top = false; x.topRank = null; }
-  });
-  // Dragging a slotted task to another slot moves it rather than duplicating.
+  const from = t.top && !t.done ? t.topRank : null;
+  const occupant = todos.find((x) => x !== t && x.top && !x.done && x.topRank === rank);
+  if (occupant) {
+    if (from !== null) {
+      occupant.topRank = from;
+    } else {
+      const used = todos.filter((x) => x.top && !x.done && x !== occupant).map((x) => x.topRank);
+      const free = [0, 1, 2].find((r) => r !== rank && used.indexOf(r) < 0);
+      if (free !== undefined) occupant.topRank = free;
+      else { occupant.top = false; occupant.topRank = null; }
+    }
+  }
   t.top = true;
   t.topRank = rank;
   save();
@@ -1846,6 +1858,12 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-01", title: "Quests swap places",
+    asked: "Dragging one of today\u2019s quests onto Up next replaced it and sent it back to the quest log. Make them switch places instead.",
+    changed: [
+      "Dragging one of today\u2019s quests onto another swaps the two, so nothing falls out of today\u2019s list.",
+      "Dragging a task in from the quest log moves the quest that was there into a free spot. It only goes back to the log when all three spots are full.",
+    ] },
   { date: "2026-10-01", title: "An update log",
     asked: "A log on the Personal tab showing what was asked for before each update, to read back later.",
     changed: [

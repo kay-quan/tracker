@@ -101,7 +101,7 @@ let app = read("app.js").replace(
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
   "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
   "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, slimeOfDay,\n" +
-  "  slimeFor, SLIMES, VIEWS, CHANGELOG,\n" +
+  "  slimeFor, SLIMES, VIEWS, CHANGELOG, assignTop,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1073,6 +1073,36 @@ t("the update log is newest first and every entry says what was asked and what c
     if (!e.asked || !e.changed.length || !e.title) throw new Error("incomplete entry: " + e.title);
     if (i && e.date > T.CHANGELOG[i - 1].date) throw new Error("out of order: " + e.title);
   });
+});
+
+const slots = () => T.getDB().todos.filter((x) => x.top && !x.done)
+  .sort((a, b) => a.topRank - b.topRank).map((x) => x.id + "@" + x.topRank).join(" ");
+
+t("dragging one of today's quests onto another swaps them", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [{ id: "a", text: "a", top: true, topRank: 0 }, { id: "b", text: "b", top: true, topRank: 1 },
+              { id: "c", text: "c", top: false, topRank: null }];
+  T.setDB(db); T.setState({ view: "calendar" });
+  T.assignTop("b", 0);
+  eq(slots(), "b@0 a@1", "b takes up next, a moves to b's old place");
+});
+
+t("a task from the quest log nudges the occupant into a free slot", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [{ id: "a", text: "a", top: true, topRank: 0 }, { id: "c", text: "c", top: false, topRank: null }];
+  T.setDB(db); T.setState({ view: "calendar" });
+  T.assignTop("c", 0);
+  eq(slots(), "c@0 a@1", "a is kept, not sent back to the log");
+});
+
+t("only with all three slots full does the occupant go back to the log", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [{ id: "a", text: "a", top: true, topRank: 0 }, { id: "b", text: "b", top: true, topRank: 1 },
+              { id: "d", text: "d", top: true, topRank: 2 }, { id: "c", text: "c", top: false, topRank: null }];
+  T.setDB(db); T.setState({ view: "calendar" });
+  T.assignTop("c", 1);
+  eq(slots(), "a@0 c@1 d@2");
+  eq(db.todos.find((x) => x.id === "b").top, false, "b returns to the log");
 });
 
 /* ---------- report ---------- */
