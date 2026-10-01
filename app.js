@@ -134,6 +134,9 @@ function defaultData() {
     },
     clients: [], gigs: [], invoices: [], income: [], expenses: [],
     outreach: [], todos: [], localEvents: [], localEventsFetchedAt: null,
+    /* XP and streak days kept from finished tasks that were later deleted, so the
+       bar never goes backwards when the list is tidied. */
+    game: { bankedXP: 0, bankedDays: [] },
     // Personal things on the calendar. Deliberately NOT gigs: they have no client,
     // no fee and no invoice, and they must never reach the money side.
     personal: [],
@@ -146,6 +149,8 @@ function withDefaults(data) {
   const base = defaultData();
   const out = Object.assign({}, base, data || {});
   out.settings = Object.assign({}, base.settings, (data && data.settings) || {});
+  out.game = Object.assign({}, base.game, (data && data.game) || {});
+  if (!Array.isArray(out.game.bankedDays)) out.game.bankedDays = [];
   Object.keys(base).forEach((k) => {
     if (Array.isArray(base[k]) && !Array.isArray(out[k])) out[k] = [];
   });
@@ -360,10 +365,86 @@ function ytdFigures() {
            pace: goal ? remaining / weeksLeft : 0 };
 }
 
+/* ---------- the game layer ---------- */
+
+/* THE XP CURVE. Every level costs this much XP. Change the number to tune it:
+   lower levels you up faster, higher makes each level a bigger deal. */
+const XP_PER_LEVEL = 500;
+
+// What a task is worth when you don't set it yourself.
+const DEFAULT_XP = 20;
+const taskXP = (t) => num(t.xp) || DEFAULT_XP;
+
+/* Sample content for the boss and reward cards until step 4 gives them real data. */
+const GAME_SAMPLE = {
+  boss: { name: "Portfolio relaunch", done: 6, steps: 10, next: "Pick 12 hero shots" },
+  reward: { name: "Sushi night", have: 7, cost: 10 },
+};
+
+/* Everything is worked out from the tasks themselves: a finished task carries its
+   XP and the day it was done. Only what was deleted is kept separately (DB.game). */
+function gameStats() {
+  const g = DB.game || {};
+  const done = (DB.todos || []).filter((t) => t.done);
+  const totalXP = num(g.bankedXP) + done.reduce((s, t) => s + taskXP(t), 0);
+  const days = new Set((g.bankedDays || []).concat(done.map((t) => t.doneAt).filter(Boolean)));
+  return {
+    totalXP: totalXP,
+    level: Math.floor(totalXP / XP_PER_LEVEL) + 1,
+    xpIntoLevel: totalXP % XP_PER_LEVEL,
+    xpPerLevel: XP_PER_LEVEL,
+    streak: streakFrom(days),
+  };
+}
+
+/* Consecutive days with at least one finished quest, counting back from today.
+   A day isn't missed until it's over, so before you finish anything today the
+   run that ended yesterday still counts. */
+function streakFrom(days, now) {
+  const d = now ? new Date(now) : new Date();
+  if (!days.has(isoOf(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (days.has(isoOf(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+
+// Before finished tasks are deleted, keep what they earned.
+function bankXP(tasks) {
+  DB.game = DB.game || { bankedXP: 0, bankedDays: [] };
+  DB.game.bankedDays = DB.game.bankedDays || [];
+  tasks.filter((t) => t.done).forEach((t) => {
+    DB.game.bankedXP = num(DB.game.bankedXP) + taskXP(t);
+    if (t.doneAt && DB.game.bankedDays.indexOf(t.doneAt) < 0) DB.game.bankedDays.push(t.doneAt);
+  });
+}
+
+function firstName() {
+  return String(DB.settings.yourName || "").trim().split(/\s+/)[0] || "";
+}
+
+// Level, streak and XP. Shown on every screen: progress you can always see.
+function renderHud() {
+  const g = gameStats();
+  $("#hud").innerHTML =
+    '<span class="hud-pill hud-level" title="Your level"><i class="e" aria-hidden="true">\u2b50</i>Level ' + g.level + "</span>" +
+    '<span class="hud-pill hud-streak" title="Days in a row with a finished quest"><i class="e" aria-hidden="true">\ud83d\udd25</i>' +
+      // No streak yet (or it lapsed): an invitation, not a scolding.
+      (g.streak ? g.streak + "-day streak" : "Start a streak") + "</span>" +
+    '<span class="hud-pill hud-xp" title="All the XP you have earned"><i class="e" aria-hidden="true">\u26a1</i>' +
+      g.totalXP.toLocaleString() + " XP</span>";
+}
+
 function renderHeader() {
   const name = DB.settings.businessName || DB.settings.yourName;
-  $("#app-title").textContent = name || "Income Tracker";
+  const first = firstName();
+  $("#app-title").textContent = state.view === "today"
+    ? "Ready to play" + (first ? ", " + first : "") + "?"
+    : name || "Income Tracker";
   document.title = name ? name + " \u00b7 Tracker" : "Income Tracker";
+  renderHud();
+
+  // Today is the game screen and keeps its header to the greeting and the HUD.
+  if (state.view === "today") { $("#app-meta").innerHTML = ""; return; }
 
   const f = ytdFigures();
   const today = new Date().toLocaleDateString(undefined,
@@ -556,7 +637,7 @@ VIEWS.dashboard = function () {
   html += '<div class="card card-pad stack">' +
     '<p class="card-title">Upcoming gigs</p>';
   if (!upcoming.length) {
-    html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing on the books yet. ' +
+    html += '<p class="muted" style="font-size:16px;margin:0">Nothing on the books yet. ' +
       '<a href="#" data-act="goto" data-view="calendar">Add a gig →</a></p>';
   } else {
     html += '<div class="table-wrap"><table><tbody>';
@@ -564,9 +645,9 @@ VIEWS.dashboard = function () {
       const away = daysBetween(todayISO(), g.date);
       html += "<tr>" +
         '<td style="width:1%;white-space:nowrap"><div class="strong">' + esc(fmtDate(g.date, { month: "short", day: "numeric" })) + "</div>" +
-        '<div class="muted" style="font-size:12px">' + (away === 0 ? "today" : away === 1 ? "tomorrow" : "in " + away + " days") + "</div></td>" +
+        '<div class="muted" style="font-size:15px">' + (away === 0 ? "today" : away === 1 ? "tomorrow" : "in " + away + " days") + "</div></td>" +
         "<td><div class=\"strong\">" + esc(g.title || "Untitled gig") + "</div>" +
-        '<div class="muted" style="font-size:12.5px">' + esc(clientName(g.clientId)) +
+        '<div class="muted" style="font-size:15px">' + esc(clientName(g.clientId)) +
         (g.location ? " · " + esc(g.location) : "") + "</div></td>" +
         '<td class="num">' + money(gigValue(g)) + "</td>" +
         '<td class="num">' + statusPill(g.status) + "</td>" +
@@ -582,7 +663,7 @@ VIEWS.dashboard = function () {
       '<div class="table-wrap"><table><tbody>';
     unbilled.forEach((g) => {
       html += "<tr><td><div class=\"strong\">" + esc(g.title || "Untitled gig") + "</div>" +
-        '<div class="muted" style="font-size:12.5px">' + esc(fmtDate(g.date)) + " · " + esc(clientName(g.clientId)) + "</div></td>" +
+        '<div class="muted" style="font-size:15px">' + esc(fmtDate(g.date)) + " · " + esc(clientName(g.clientId)) + "</div></td>" +
         '<td class="num strong">' + money(gigValue(g)) + "</td>" +
         '<td class="actions"><button class="btn btn-sm btn-primary" data-act="invoice-gig" data-id="' + g.id + '">Invoice it</button></td></tr>';
     });
@@ -595,14 +676,14 @@ VIEWS.dashboard = function () {
   html += '<div class="card card-pad todo-card stack">' + todoCard() + "</div>";
   html += '<div class="card card-pad" style="margin-bottom:16px"><p class="card-title">Open invoices</p>';
   if (!open.length) {
-    html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing outstanding. Nice.</p>';
+    html += '<p class="muted" style="font-size:16px;margin:0">Nothing outstanding. Nice.</p>';
   } else {
     html += '<div class="table-wrap"><table><tbody>';
     open.sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")).forEach((inv) => {
       const st = invoiceStatus(inv);
       const owed = invoiceTotals(inv).total - invoicePaid(inv);
       html += "<tr><td><div class=\"strong\">" + esc(inv.number) + "</div>" +
-        '<div class="muted" style="font-size:12.5px">' + esc(clientName(inv.clientId)) +
+        '<div class="muted" style="font-size:15px">' + esc(clientName(inv.clientId)) +
         (inv.dueDate ? " · due " + esc(fmtDate(inv.dueDate, { month: "short", day: "numeric" })) : "") + "</div></td>" +
         '<td class="num"><div class="strong">' + money(owed) + "</div>" +
         '<div style="margin-top:2px">' + '<span class="pill ' + STATUS_PILL[st] + '">' + st + "</span></div></td>" +
@@ -722,26 +803,69 @@ function trimNotes() {
   });
 }
 
-function taskRow(t, opts) {
-  const o = opts || {};
-  const meta = (t.category
+/* The round check button. Done is a filled circle with a tick AND a struck-through
+   title, so it never relies on colour alone. */
+function checkBtn(t) {
+  return '<button class="checkbtn' + (t.done ? " on" : "") + '" data-act="toggle-todo" data-id="' + t.id +
+    '" aria-pressed="' + (t.done ? "true" : "false") + '" aria-label="' +
+    esc((t.done ? "Mark not done: " : "Mark done: ") + t.text) + '">' +
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>';
+}
+
+function xpPill(t) {
+  return '<span class="xp-pill' + (t.done ? " earned" : "") + '">' +
+    (t.done ? "\u2713 " : "+") + taskXP(t) + " XP</span>";
+}
+
+function taskMeta(t) {
+  return (t.category
     ? '<span class="chip ' + (CATEGORY_TONE[t.category] || "") + '">' + esc(t.category) + "</span>"
     : "") + dueTag(t);
+}
+
+function taskRow(t, opts) {
+  const o = opts || {};
+  const meta = taskMeta(t);
   return '<div class="taskrow' + (t.done ? " done" : "") + '"' +
     (o.draggable ? ' draggable="true" data-todo-id="' + t.id + '"' : "") + ">" +
     (o.draggable ? '<span class="grip" aria-hidden="true">\u22ee\u22ee</span>' : "") +
-    '<input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '"' +
-      (t.done ? " checked" : "") + ">" +
+    checkBtn(t) +
     '<div class="taskbody">' +
     '<div class="tasktitle">' + esc(t.text) + "</div>" +
     (meta ? '<div class="taskmeta">' + meta + "</div>" : "") +
     notesHTML(t) +
     "</div>" +
-    '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit">\u270e</button>' +
+    (o.restore ? "" : xpPill(t)) +
+    '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
     (o.restore
       ? '<button class="btn btn-sm" data-act="toggle-todo" data-id="' + t.id + '">Restore</button>'
-      : '<button class="iconbtn" data-act="delete-todo" data-id="' + t.id + '" title="Remove">\u00d7</button>') +
+      : '<button class="iconbtn" data-act="delete-todo" data-id="' + t.id + '" title="Remove" aria-label="Delete task">\u00d7</button>') +
     "</div>";
+}
+
+/* One of today's quests: a card of its own. A slotted quest is also a drop target,
+   so dragging a task from the quest log onto it swaps the two, as the Top 3 did. */
+function questCard(t, o) {
+  const meta = taskMeta(t);
+  const slotted = t.top && !t.done;
+  return '<div class="quest' + (o.upNext ? " upnext on-yellow" : "") + (t.done ? " done" : "") +
+    (slotted ? " slot filled" : "") + '"' +
+    (slotted ? ' data-slot="' + t.topRank + '" draggable="true" data-todo-id="' + t.id + '"' : "") + ">" +
+    checkBtn(t) +
+    '<div class="taskbody">' +
+    (o.upNext ? '<span class="upnext-tag">Up next</span>' : "") +
+    '<div class="tasktitle">' + esc(t.text) + "</div>" +
+    (meta ? '<div class="taskmeta">' + meta + "</div>" : "") +
+    notesHTML(t) +
+    (o.fromLog ? '<button class="btn btn-sm quest-add" data-act="pick-task" data-id="' + t.id +
+      '" data-rank="0">Add to today</button>' : "") +
+    "</div>" +
+    '<div class="quest-side">' + xpPill(t) +
+    '<div class="quest-tools">' +
+    '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
+    (slotted ? '<button class="iconbtn" data-act="untop-todo" data-id="' + t.id +
+      '" title="Back to the quest log" aria-label="Move back to the quest log">\u21a9</button>' : "") +
+    "</div></div></div>";
 }
 
 function taskForm(rec) {
@@ -757,6 +881,8 @@ function taskForm(rec) {
     '<div class="field"><label>Due <span class="hint">optional</span></label>' +
     '<input type="date" name="due" value="' + esc(t.due || "") + '"></div>' +
     "</div>" +
+    '<div class="field"><label>XP reward <span class="hint">bigger task, bigger reward</span></label>' +
+    '<input type="number" name="xp" min="1" max="1000" step="1" value="' + taskXP(t) + '"></div>' +
     '<div class="field"><label>Notes <span class="hint">the detail you\u2019d otherwise forget</span></label>' +
     '<textarea name="notes" rows="6">' + esc(t.notes || "") + "</textarea></div>" +
     "</form>";
@@ -775,17 +901,19 @@ function saveTask(id) {
                             top: false, topRank: null };
   Object.assign(rec, {
     text: v.text.trim(), category: v.category, due: v.due, notes: v.notes.trim(),
+    xp: Math.max(1, Math.round(num(v.xp))) || DEFAULT_XP,
   });
   if (!existing) DB.todos.push(rec);
   save(); closeModal(); render();
 }
 
-function todoListHTML() {
-  const open = (DB.todos || []).filter((t) => !t.done && !t.top);
+// `skipId` leaves out a task already shown as Today's up-next quest.
+function todoListHTML(skipId) {
+  const open = (DB.todos || []).filter((t) => !t.done && !t.top && t.id !== skipId);
   if (!open.length) {
-    const slotted = (DB.todos || []).some((t) => t.top && !t.done);
-    return '<p class="muted" style="font-size:13.5px;margin:12px 0 0">' +
-      (slotted ? "Everything left is up in your Top 3."
+    const slotted = !!skipId || (DB.todos || []).some((t) => t.top && !t.done);
+    return '<p class="muted list-empty">' +
+      (slotted ? "Everything left is in today\u2019s quests."
                : "Nothing on the list. Chase an invoice, email a venue, book a shoot \u2014 " +
                  "whatever's next.") + "</p>";
   }
@@ -823,7 +951,7 @@ function setGoalDialog() {
     '<span class="hint">net, after expenses</span></label>' +
     '<input type="number" name="incomeGoal" step="100" min="0" value="' +
     esc(num(DB.settings.incomeGoal) || "") + '" placeholder="100000"></div>' +
-    '<p class="muted" style="font-size:13px;margin:0">Leave it blank to hide the goal tracking.</p></form>',
+    '<p class="muted" style="font-size:16px;margin:0">Leave it blank to hide the goal tracking.</p></form>',
     '<button class="btn" data-act="close-modal">Cancel</button>' +
     '<button class="btn btn-primary" data-act="save-goal">Save</button>');
 }
@@ -846,13 +974,14 @@ function assignTop(taskId, rank) {
 // Touch devices don't fire HTML5 drag events, so tapping an empty slot offers
 // the same thing as a list.
 function pickTopDialog(rank) {
-  const open = (DB.todos || []).filter((t) => !t.done && !(t.top && t.topRank === rank));
+  // Already one of today's quests? Then it isn't offered again.
+  const open = (DB.todos || []).filter((t) => !t.done && !t.top);
   if (!open.length) {
     openModal("Nothing to add", "<p>Add a task first, then it can go in a slot.</p>",
       '<button class="btn btn-primary" data-act="close-modal">OK</button>');
     return;
   }
-  openModal("Put in slot " + (rank + 1),
+  openModal("Pick a quest for today",
     '<div class="picklist">' + open.map((t) =>
       '<button class="pick" data-act="pick-task" data-id="' + t.id + '" data-rank="' + rank + '">' +
       esc(t.text) + "</button>").join("") + "</div>",
@@ -924,11 +1053,65 @@ function addTodo() {
 function toggleTodo(id) {
   const t = (DB.todos || []).find((x) => x.id === id);
   if (!t) return;
+  const before = gameStats();
+  // Where the click happened. Finishing moves the card, but the reward belongs here.
+  const was = $('.checkbtn[data-id="' + id + '"]');
+  const at = was ? was.getBoundingClientRect() : null;
   t.done = !t.done;
   t.doneAt = t.done ? todayISO() : null;
   if (t.done) { t.top = false; t.topRank = null; }   // finishing frees its slot
   save();
   refreshTodoList();
+  if (t.done) playReward(t, before, gameStats(), at);
+}
+
+/* The reward for ticking something off: the check pops, "+20 XP" floats up from
+   it, the bar fills from where it was. Under a second, so it never slows you down.
+   A new level gets a short celebration on top. */
+function playReward(t, before, after, at) {
+  const btn = $('.checkbtn[data-id="' + t.id + '"]');
+  if (btn) btn.classList.add("pop");
+  const r = at || (btn && btn.getBoundingClientRect());
+  if (r) {
+    const f = document.createElement("div");
+    f.className = "xp-float";
+    f.setAttribute("aria-hidden", "true");
+    f.textContent = "+" + taskXP(t) + " XP";
+    f.style.left = (r.left + r.width / 2) + "px";
+    f.style.top = r.top + "px";
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), 900);
+  }
+  const pill = $(".hud-xp");
+  if (pill) pill.classList.add("bump");
+
+  const levelUp = after.level > before.level;
+  const fill = $(".xpbar .meter-fill");
+  if (fill) {
+    const to = fill.style.width;
+    fill.style.transition = "none";
+    fill.style.width = (levelUp ? 0 : Math.round(before.xpIntoLevel / before.xpPerLevel * 100)) + "%";
+    void fill.offsetWidth;            // commit the start width before animating
+    fill.style.transition = "";
+    fill.style.width = to;
+  }
+  if (levelUp) celebrateLevel(after.level);
+}
+
+function celebrateLevel(level) {
+  const old = $(".levelup");
+  if (old) old.remove();
+  const box = document.createElement("div");
+  box.className = "levelup";
+  box.setAttribute("role", "status");
+  box.innerHTML = '<div class="levelup-card on-yellow">' +
+    '<div class="levelup-burst" aria-hidden="true">' +
+    Array.from({ length: 12 }, (_, i) => '<i style="--a:' + (i * 30) + 'deg"></i>').join("") + "</div>" +
+    '<div class="levelup-kicker">Level up!</div>' +
+    '<div class="levelup-level">Level ' + level + "</div></div>";
+  box.addEventListener("click", () => box.remove());
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 2200);
 }
 
 /* What actually earned the money, rather than just that money arrived.
@@ -1079,7 +1262,7 @@ function groupSum(rows, keyFn) {
 }
 
 function breakdown(pairs, color, emptyMsg) {
-  if (!pairs.length) return '<p class="muted" style="font-size:13.5px;margin:0">' + esc(emptyMsg) + "</p>";
+  if (!pairs.length) return '<p class="muted" style="font-size:16px;margin:0">' + esc(emptyMsg) + "</p>";
   const max = pairs[0][1] || 1;
   return pairs.slice(0, 8).map(([name, amt]) =>
     '<div class="bar-row"><div class="name" title="' + esc(name) + '">' + esc(name) + "</div>" +
@@ -1192,64 +1375,69 @@ function nudges() {
 }
 
 VIEWS.today = function () {
+  const g = gameStats();
+  const s = GAME_SAMPLE;
+  const todos = DB.todos || [];
+  const today = todayISO();
   let html = "";
 
-  if (!setupComplete()) {
-    html += '<div class="nudge tone-amber"><div class="nudge-text">' +
-      "<strong>Add your name and email</strong> so your invoices carry your details.</div>" +
-      '<button class="btn btn-primary btn-sm" data-act="goto" data-view="settings">Settings</button></div>';
+  /* ---- XP bar, full width under the header ---- */
+  const pct = Math.min(100, Math.round(g.xpIntoLevel / g.xpPerLevel * 100));
+  html += '<section class="card xpbar">' +
+    '<div class="xpbar-head"><span class="xpbar-title">' +
+    (pct >= 60 ? "Level " + (g.level + 1) + " is close" : "On the way to Level " + (g.level + 1)) + "</span>" +
+    '<span class="xpbar-num">' + g.xpIntoLevel + " / " + g.xpPerLevel + " XP</span></div>" +
+    '<div class="meter" role="progressbar" aria-label="XP toward the next level" aria-valuemin="0" aria-valuemax="' +
+      g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
+    "</section>";
+
+  /* ---- today's quests: your Top 3 picks, plus what you finished today ---- */
+  const picked = todos.filter((t) => t.top && !t.done).sort((a, b) => a.topRank - b.topRank);
+  const doneToday = todos.filter((t) => t.done && t.doneAt === today);
+  /* Nothing picked for today? Up next falls back to the open task due soonest, so
+     there is always one obvious place to start. */
+  let fallback = null;
+  if (!picked.length) {
+    const dated = todos.filter((t) => !t.done && !t.top && t.due).sort((a, b) => a.due.localeCompare(b.due));
+    fallback = dated[0] || null;
+  }
+  const quests = (fallback ? [fallback] : picked);
+  const total = quests.length + doneToday.length;
+
+  html += '<div class="play-cols"><div class="play-main">';
+  html += '<div class="quest-head"><h2>Today’s quests</h2>' +
+    (total ? '<span class="count-pill">' + doneToday.length + " of " + total + " done</span>" : "") + "</div>";
+
+  quests.forEach((t, i) => { html += questCard(t, { upNext: i === 0, fromLog: t === fallback }); });
+
+  // One open slot at a time: a drop target for dragging, a button for tapping.
+  const used = picked.map((t) => t.topRank);
+  const free = [0, 1, 2].find((r) => used.indexOf(r) < 0);
+  if (free !== undefined) {
+    html += '<div class="slot quest-slot" data-slot="' + free + '" data-act="pick-top" data-rank="' + free + '">' +
+      '<span class="slot-plus" aria-hidden="true">＋</span>' +
+      '<span class="slot-empty">' + (picked.length ? "Add another quest" : "Pick a quest for today") +
+      '<span class="drag-hint"> · drag one here or click</span></span></div>';
   }
 
-  const list = nudges();
-  list.forEach((n) => {
-    html += '<div class="nudge tone-' + n.tone + '"><div class="nudge-text">' + n.text + "</div>" +
-      '<button class="btn btn-primary btn-sm" data-act="' + (n.action.act || "goto") + '"' +
-      (n.action.view ? ' data-view="' + n.action.view + '"' : "") +
-      (n.action.id ? ' data-id="' + n.action.id + '"' : "") + ">" + esc(n.action.label) + "</button></div>";
-  });
-  if (!list.length && setupComplete()) {
-    html += '<div class="nudge tone-green"><div class="nudge-text">Nothing on fire. ' +
-      "Good time to chase a venue or line up next month.</div>" +
-      '<button class="btn btn-primary btn-sm" data-act="goto" data-view="outreach">Outreach</button></div>';
-  }
+  doneToday.forEach((t) => { html += questCard(t, {}); });
 
-  /* ---- two columns: priorities on the left, the backlog on the right ---- */
-  const todos = DB.todos || [];
-  html += '<div class="today-cols"><div>';
-  html += '<h2 class="section-head">Top 3 today</h2>';
-  for (let i = 0; i < 3; i++) {
-    const t = todos.find((x) => x.top && !x.done && x.topRank === i);
-    html += t
-      ? '<div class="slot filled" data-slot="' + i + '">' +
-        '<span class="slot-n">' + (i + 1) + "</span>" +
-        '<div class="slot-task">' + taskRow(t, { draggable: true }) + "</div>" +
-        '<button class="slot-x" data-act="untop-todo" data-id="' + t.id + '" title="Remove from Top 3">\u00d7</button></div>'
-      : '<div class="slot" data-slot="' + i + '" data-act="pick-top" data-rank="' + i + '">' +
-        '<span class="slot-n">' + (i + 1) + "</span>" +
-        '<span class="slot-empty">Drag a task here<span class="tap-hint"> \u00b7 or tap to pick</span></span></div>';
-  }
-
-  html += "</div><div>";
-
-  /* ---- all tasks ---- */
-  const open = todos.filter((t) => !t.done && !t.top);
-  const done = todos.filter((t) => t.done);
-  /* The action sits on the heading, not inside the card: the list below is then a
-     list of tasks and nothing else. The quick-add field stays under it, because
-     typing a title and pressing Enter is how most tasks actually get added. */
-  html += '<h2 class="section-head">All tasks' +
+  /* ---- the quest log: everything else ---- */
+  const open = todos.filter((t) => !t.done && !t.top && t !== fallback);
+  html += '<h2 class="section-head">Quest log' +
     (open.length ? ' <span class="count">' + open.length + "</span>" : "") +
     '<button class="btn btn-sm section-action" data-act="new-task"' +
-    ' title="With a category, due date and notes">\uff0b New task</button></h2>';
+    ' title="With a category, due date and notes">＋ New task</button></h2>';
   html += '<div class="card card-pad todo-card">' +
     '<div class="todo-add">' +
-    '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200">' +
+    '<input id="todo-input" type="text" placeholder="Add a task…" maxlength="200" aria-label="New task">' +
     '<button class="btn btn-sm" data-act="add-todo">Add</button></div>' +
-    '<div id="todo-list">' + todoListHTML() + "</div></div>";
+    '<div id="todo-list">' + todoListHTML(fallback && fallback.id) + "</div></div>";
 
+  const done = todos.filter((t) => t.done);
   if (done.length) {
-    html += '<button class="disclosure" data-act="toggle-done">' +
-      (state.showDone ? "\u25be" : "\u25b8") + " Completed <span class=\"count\">" + done.length + "</span></button>";
+    html += '<button class="disclosure" data-act="toggle-done" aria-expanded="' + !!state.showDone + '">' +
+      (state.showDone ? "▾" : "▸") + " Completed <span class=\"count\">" + done.length + "</span></button>";
     if (state.showDone) {
       // Newest first, and each one can be put back rather than only deleted.
       const recent = done.slice().sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
@@ -1260,7 +1448,48 @@ VIEWS.today = function () {
     }
   }
 
-  html += "</div></div>";
+  /* ---- heads up: the money and setup nudges, below the game ---- */
+  const notes = [];
+  if (!setupComplete()) {
+    notes.push('<div class="nudge tone-amber"><div class="nudge-text">' +
+      "<strong>Add your name and email</strong> so your invoices carry your details.</div>" +
+      '<button class="btn btn-primary btn-sm" data-act="goto" data-view="settings">Settings</button></div>');
+  }
+  nudges().forEach((n) => {
+    notes.push('<div class="nudge tone-' + n.tone + '"><div class="nudge-text">' + n.text + "</div>" +
+      '<button class="btn btn-primary btn-sm" data-act="' + (n.action.act || "goto") + '"' +
+      (n.action.view ? ' data-view="' + n.action.view + '"' : "") +
+      (n.action.id ? ' data-id="' + n.action.id + '"' : "") + ">" + esc(n.action.label) + "</button></div>");
+  });
+  if (notes.length) html += '<h2 class="section-head">Heads up</h2>' + notes.join("");
+
+  html += '</div><aside class="play-side">';
+
+  /* ---- sidebar: roll, boss, reward (sample content until steps 3 and 4) ---- */
+  html += '<section class="card side-card roll-card on-yellow">' +
+    "<h2>Can’t decide?</h2><p>Let the dice pick your next quest.</p>" +
+    '<button class="btn btn-big" disabled>🎲 Roll a quest</button>' +
+    '<p class="soon">Rolling arrives in step 3.</p></section>';
+
+  const hp = Math.round((1 - s.boss.done / s.boss.steps) * 100);
+  html += '<section class="card side-card boss-card">' +
+    '<div class="side-top"><span class="tag tag-boss">Boss</span><span class="tag tag-sample">Sample</span></div>' +
+    "<h2>" + esc(s.boss.name) + "</h2>" +
+    '<div class="meter meter-boss" role="progressbar" aria-label="Boss health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + hp + '">' +
+    '<div class="meter-fill" style="width:' + hp + '%"></div></div>' +
+    '<p class="side-line"><strong>' + s.boss.done + " of " + s.boss.steps + "</strong> steps done · " + hp + "% health left</p>" +
+    '<p class="side-line">Next hit: ' + esc(s.boss.next) + "</p></section>";
+
+  const rp = Math.min(100, Math.round(s.reward.have / s.reward.cost * 100));
+  html += '<section class="card side-card reward-card on-blue">' +
+    '<div class="side-top"><span class="tag tag-reward">Next reward</span><span class="tag tag-sample">Sample</span></div>' +
+    "<h2>🍣 " + esc(s.reward.name) + "</h2>" +
+    '<div class="meter meter-reward" role="progressbar" aria-label="Quests toward this reward" aria-valuemin="0" aria-valuemax="' +
+      s.reward.cost + '" aria-valuenow="' + s.reward.have + '"><div class="meter-fill" style="width:' + rp + '%"></div></div>' +
+    '<p class="side-line"><strong>' + s.reward.have + " / " + s.reward.cost + "</strong> quests · " +
+      (s.reward.cost - s.reward.have) + " to go</p></section>";
+
+  html += "</aside></div>";
   return html;
 };
 
@@ -1577,7 +1806,7 @@ function gigsCalendar() {
     '<div class="sub">net, collected' + (mm.made < 0 ? " — costs ahead of income" : "") + "</div></div>" +
     '<div class="card stat upc"><div class="lbl">Upcoming</div>' +
     '<div class="val">' + money(mm.upcoming) +
-    (mm.tbd ? ' <span style="font-size:12px">+' + mm.tbd + " TBD</span>" : "") + "</div>" +
+    (mm.tbd ? ' <span style="font-size:15px">+' + mm.tbd + " TBD</span>" : "") + "</div>" +
     '<div class="sub">billed / owed</div></div>' +
     '<div class="card stat"><div class="lbl">Projected</div>' +
     '<div class="val">' + money(mm.made + mm.upcoming) + "</div>" +
@@ -1660,7 +1889,7 @@ function gigDayPanel(list, pers) {
   }
 
   if (!list.length && !pers.length) {
-    html += '<p class="muted" style="font-size:13.5px;margin:0">Nothing scheduled.</p>';
+    html += '<p class="muted" style="font-size:16px;margin:0">Nothing scheduled.</p>';
   } else {
     html += list.map((g) => {
       const v = gigValue(g);
@@ -1847,7 +2076,7 @@ function dayPanel(byDate) {
         (e.venue && eventName(e) !== e.venue
           ? '<span class="daypanel-venue">' + esc(e.venue) + "</span>" : "") +
         "</button>").join("") + "</div>"
-    : '<p class="muted" style="margin:8px 0 0;font-size:13.5px">' +
+    : '<p class="muted" style="margin:8px 0 0;font-size:16px">' +
       "Nothing listed here yet. Add a show if you know of one.</p>";
 
   return html + "</div>";
@@ -1858,7 +2087,7 @@ function eventsAgenda(byDate) {
     .filter((d) => d.slice(0, 7) === state.calMonth)
     .sort();
   if (!dates.length) {
-    return '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+    return '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
       "Nothing listed for " + esc(monthLabelOf(state.calMonth)) + ".</p></div>";
   }
   const today = todayISO();
@@ -1981,7 +2210,7 @@ function eventsEmptyState() {
       '<a class="btn btn-primary" href="https://edmtrain.com/developer-api" target="_blank" rel="noopener">Request a key</a>' +
       '<button class="btn" data-act="goto" data-view="settings">Paste it in Settings</button>' +
       '<button class="btn" data-act="new-local-event">Add one by hand</button></div>' +
-      '<p class="muted" style="font-size:13px;margin-top:16px">No key needed to add shows yourself \u2014 ' +
+      '<p class="muted" style="font-size:16px;margin-top:16px">No key needed to add shows yourself \u2014 ' +
       "handy for anything the feed doesn't carry.</p></div>";
   }
   return '<div class="card empty"><h3>No shows loaded yet</h3>' +
@@ -2000,7 +2229,7 @@ function showEvent(id) {
     '<p class="muted" style="margin-top:0">' + esc(fmtDateLong(e.date)) +
     (e.ages ? " \u00b7 " + esc(e.ages) : "") + (e.festival ? ' \u00b7 <span class="pill pill-amber">festival</span>' : "") + "</p>" +
     '<div class="field"><label>Venue</label><div class="strong">' + esc(e.venue || "\u2014") + "</div>" +
-    (e.address ? '<div class="muted" style="font-size:13px">' + esc(e.address) +
+    (e.address ? '<div class="muted" style="font-size:16px">' + esc(e.address) +
       (e.city ? ", " + esc(e.city) : "") + "</div>" : "") + "</div>" +
     (e.artists && e.artists.length
       ? '<div class="field"><label>Lineup</label><div>' + e.artists.map(esc).join(", ") + "</div></div>" : "") +
@@ -2014,7 +2243,7 @@ function showEvent(id) {
   openModal(e.name, body,
     (e.manual ? '<button class="btn btn-sm" data-act="edit-local-event" data-id="' + esc(e.id) + '">Edit</button>' : "") +
     (inPipeline
-      ? '<span class="muted" style="font-size:13px">' + esc(e.venue) + " is already in your outreach.</span>"
+      ? '<span class="muted" style="font-size:16px">' + esc(e.venue) + " is already in your outreach.</span>"
       : '<button class="btn" data-act="outreach-from-venue" data-venue="' + esc(e.venue || "") + '">Add venue</button>') +
     (acts.length
       ? '<button class="btn btn-primary" data-act="outreach-lineup" data-id="' + esc(e.id) + '">Add ' +
@@ -2112,10 +2341,10 @@ VIEWS.gigs = function () {
     html += '<tr data-search="' + esc(((g.title || "") + " " + clientName(g.clientId) + " " + (g.location || "")).toLowerCase()) +
       '" data-status="' + esc(g.status || "") + '">' +
       "<td><div>" + esc(fmtDate(g.date)) + "</div>" +
-      (g.startTime ? '<div class="muted" style="font-size:12px">' + esc(fmtTime(g.startTime)) +
+      (g.startTime ? '<div class="muted" style="font-size:15px">' + esc(fmtTime(g.startTime)) +
         (g.endTime ? "–" + esc(fmtTime(g.endTime)) : "") + "</div>" : "") + "</td>" +
       '<td><div class="strong">' + esc(g.title || "Untitled gig") + "</div>" +
-      (g.location ? '<div class="muted" style="font-size:12.5px">' + esc(g.location) + "</div>" : "") + "</td>" +
+      (g.location ? '<div class="muted" style="font-size:15px">' + esc(g.location) + "</div>" : "") + "</td>" +
       "<td>" + esc(clientName(g.clientId)) + "</td>" +
       '<td class="muted">' + (g.rateType === "hourly"
         ? money(g.rate) + "/hr × " + (num(g.hours) || 0) + "h" : "flat") + "</td>" +
@@ -2278,7 +2507,7 @@ VIEWS.invoices = function () {
       " invoice" + (drafts.length === 1 ? "" : "s") + "</span>" : "") + "</h2>";
 
   if (!drafts.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
       "Nothing waiting to go out. Every invoice you've written has been sent.</p></div>";
   } else {
     drafts.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
@@ -2305,7 +2534,7 @@ VIEWS.invoices = function () {
       " client" + (groups.size === 1 ? "" : "s") + "</span>" : "") + "</h2>";
 
   if (!owing.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
       "Nothing outstanding. Everything you've sent has been paid.</p></div>";
   } else {
     Array.from(groups.values())
@@ -2353,7 +2582,7 @@ VIEWS.invoices = function () {
     settled.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
       html += '<div class="listrow" data-act="preview-invoice" data-id="' + inv.id + '">' +
         '<span><strong>' + esc(inv.number) + "</strong><br>" +
-        '<span class="muted" style="font-size:12.5px">' + esc(clientName(inv.clientId)) + " \u00b7 " +
+        '<span class="muted" style="font-size:15px">' + esc(clientName(inv.clientId)) + " \u00b7 " +
         esc(fmtDate(inv.issueDate)) + "</span></span>" +
         '<span class="listrow-amt">' + money(invoiceTotals(inv).total) + "</span></div>";
     });
@@ -2573,7 +2802,7 @@ function markUnpaid(id) {
   openModal("Mark " + esc(inv.number) + " as unpaid?",
     "<p>This invoice has <strong>" + money(sum) + "</strong> recorded against it in " +
     (pays.length === 1 ? "one payment" : pays.length + " payments") + ":</p>" +
-    '<ul style="margin:0 0 12px;padding-left:18px;font-size:13.5px">' +
+    '<ul style="margin:0 0 12px;padding-left:18px;font-size:16px">' +
     pays.map((p) => "<li>" + esc(fmtDate(p.date)) + " — <strong>" + money(p.amount) + "</strong>" +
       (p.method ? " · " + esc(p.method) : "") + "</li>").join("") + "</ul>" +
     "<p>Marking it unpaid removes " + (pays.length === 1 ? "it" : "them") +
@@ -2608,7 +2837,7 @@ function markPaidDialog(id) {
   const owed = invoiceTotals(inv).total - invoicePaid(inv);
   const body =
     '<form id="pay-form">' +
-    '<p class="muted" style="margin-top:0;font-size:13.5px">' + esc(inv.number) + " · " +
+    '<p class="muted" style="margin-top:0;font-size:16px">' + esc(inv.number) + " · " +
     esc(clientName(inv.clientId)) + " · " + money(owed) + " outstanding</p>" +
     '<div class="field-row">' +
     '<div class="field"><label>Date received</label><input type="date" name="date" value="' + todayISO() + '"></div>' +
@@ -2827,7 +3056,7 @@ async function savePdf(id) {
     setSaveState("", "");
     openModal("Couldn't make the PDF",
       "<p>" + esc(err.message) + "</p>" +
-      "<p class=\"muted\" style=\"font-size:13px\">Printing still works and gives " +
+      "<p class=\"muted\" style=\"font-size:16px\">Printing still works and gives " +
       "sharper text — choose <strong>Save as PDF</strong> as the destination.</p>",
       '<button class="btn" data-act="close-modal">Cancel</button>' +
       '<button class="btn btn-primary" data-act="print-invoice" data-id="' + id + '">Print instead</button>');
@@ -2961,7 +3190,7 @@ VIEWS.income = function () {
       '<button class="btn btn-primary" data-act="new-income">Log a payment</button></div>';
   }
   if (!rows.length) {
-    return html + '<div class="card card-pad"><p class="muted" style="margin:0;font-size:14px">' +
+    return html + '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
       "Nothing received in " + esc(r.label) + ".</p></div>";
   }
 
@@ -3028,7 +3257,7 @@ function incomeForm(rec) {
   const linked = i.invoiceId ? invoiceById(i.invoiceId) : null;
   const body =
     '<form id="income-form">' +
-    (linked ? '<p class="muted" style="margin-top:0;font-size:13.5px">Linked to invoice ' + esc(linked.number) + ".</p>" : "") +
+    (linked ? '<p class="muted" style="margin-top:0;font-size:16px">Linked to invoice ' + esc(linked.number) + ".</p>" : "") +
     '<div class="field-row">' +
     '<div class="field"><label>Date received</label><input type="date" name="date" value="' + esc(i.date) + '" required></div>' +
     '<div class="field"><label>Amount</label><input type="number" step="0.01" name="amount" value="' + esc(i.amount) + '" required></div>' +
@@ -3097,7 +3326,7 @@ VIEWS.expenses = function () {
   inPeriod.forEach((e) => {
     html += "<tr><td>" + esc(fmtDate(e.date)) + "</td>" +
       '<td><div class="strong">' + esc(e.vendor || "—") + "</div>" +
-      (e.notes ? '<div class="muted" style="font-size:12.5px">' + esc(e.notes) + "</div>" : "") + "</td>" +
+      (e.notes ? '<div class="muted" style="font-size:15px">' + esc(e.notes) + "</div>" : "") + "</td>" +
       '<td><span class="pill pill-gray">' + esc(e.category || "Uncategorised") + "</span>" +
       (e.deductible ? ' <span class="pill pill-green">deductible</span>' : "") + "</td>" +
       '<td class="muted">' + esc(e.method || "—") + "</td>" +
@@ -3177,9 +3406,9 @@ VIEWS.clients = function () {
     const gigCount = DB.gigs.filter((g) => g.clientId === c.id).length;
     const owed = invs.reduce((s, i) => s + (invoiceStatus(i) === "paid" ? 0 : invoiceTotals(i).total - invoicePaid(i)), 0);
     html += '<tr><td><div class="strong">' + esc(c.name) + "</div>" +
-      (c.rate ? '<div class="muted" style="font-size:12.5px">' + money(c.rate) + "/hr</div>" : "") + "</td>" +
+      (c.rate ? '<div class="muted" style="font-size:15px">' + money(c.rate) + "/hr</div>" : "") + "</td>" +
       "<td>" + (c.contactName ? esc(c.contactName) + "<br>" : "") +
-      '<span class="muted" style="font-size:12.5px">' + esc(c.email || "") + "</span></td>" +
+      '<span class="muted" style="font-size:15px">' + esc(c.email || "") + "</span></td>" +
       '<td class="muted">' + gigCount + "</td>" +
       '<td class="num">' + money(billed) + "</td>" +
       '<td class="num" style="color:var(--money-in)">' + money(paid) + "</td>" +
@@ -3292,7 +3521,7 @@ VIEWS.outreach = function () {
   // Said once, here, rather than repeated on every lineup card.
   const st = window.ARTIST_STATS;
   if (st) {
-    html += '<p class="muted" style="font-size:12.5px;margin:0 0 12px">' +
+    html += '<p class="muted" style="font-size:15px;margin:0 0 12px">' +
       "<strong>" + st.acts + "</strong> acts across <strong>" + st.festivals +
       "</strong> lineups \u00b7 <strong>" + st.reachable + "</strong> with an address on file (" +
       st.addresses + " total). Every address carries the page it was read from." +
@@ -3378,7 +3607,7 @@ function importArtistDB() {
     if (!payload.acts || !payload.festivals) {
       openModal("Wrong file",
         "<p>That JSON doesn't look like the artist database — expected <code>acts</code> " +
-        "and <code>festivals</code>.</p><p class=\"muted\" style=\"font-size:13px\">" +
+        "and <code>festivals</code>.</p><p class=\"muted\" style=\"font-size:16px\">" +
         "Generate it with <code>python3 tools/gen_artists_js.py --apply</code>.</p>",
         '<button class="btn btn-primary" data-act="close-modal">OK</button>');
       return;
@@ -3774,7 +4003,7 @@ function outreachLineups(rows) {
 
     // the acts themselves
     if (!shown.length) {
-      html += '<p class="muted" style="font-size:13px;margin:10px 0 0">Nothing matches that filter.</p>';
+      html += '<p class="muted" style="font-size:16px;margin:10px 0 0">Nothing matches that filter.</p>';
     } else {
       html += '<div class="pickgrid">' + shown.map((r) => {
         const cls = sel[r.id] ? "picked"
@@ -4010,9 +4239,9 @@ function draftEach(fest) {
       (fresh.length === 1 ? "" : "s") + ", one per act, a moment apart so none are dropped.</p>" +
       "<p>They're marked <em>drafted</em>, not contacted — tell me once you've actually " +
       "sent them and I'll move them along.</p>" +
-      (already.length ? '<p class="muted" style="font-size:13px">' + already.length +
+      (already.length ? '<p class="muted" style="font-size:16px">' + already.length +
         " already contacted, skipped.</p>" : "") +
-      (missing.length ? '<p class="muted" style="font-size:13px">' + missing.length +
+      (missing.length ? '<p class="muted" style="font-size:16px">' + missing.length +
         " with no address, skipped.</p>" : ""),
       '<button class="btn" data-act="close-modal">Not yet</button>' +
       '<button class="btn btn-primary" data-act="mark-drafted-sent">Mark ' + fresh.length +
@@ -4090,7 +4319,7 @@ function emailPicked(fest) {
   if (!reachable.length) {
     openModal("No addresses yet",
       "<p>None of the acts you picked have an email on file, so there's nobody to write to.</p>" +
-      '<p class="muted" style="font-size:13px">Tap an act to open it and add an address, ' +
+      '<p class="muted" style="font-size:16px">Tap an act to open it and add an address, ' +
       "then pick it again.</p>",
       '<button class="btn btn-primary" data-act="close-modal">OK</button>');
     return;
@@ -4124,7 +4353,7 @@ function emailPicked(fest) {
     (reachable.length === 1 ? "" : "s") + "</strong> in BCC, so nobody sees anyone else's address.</p>" +
     "<p>They've been moved to <em>contacted</em>.</p>" +
     (missing.length
-      ? '<p class="muted" style="font-size:13px">' + missing.length +
+      ? '<p class="muted" style="font-size:16px">' + missing.length +
         " picked act" + (missing.length === 1 ? "" : "s") + " had no address and " +
         (missing.length === 1 ? "was" : "were") + " left out.</p>"
       : ""),
@@ -4391,7 +4620,7 @@ VIEWS.settings = function () {
     '<div class="field"><label>Prefix</label><input name="invoicePrefix" value="' + esc(s.invoicePrefix) + '"></div>' +
     '<div class="field"><label>Next number</label><input type="number" name="nextInvoiceNumber" value="' + esc(s.nextInvoiceNumber) + '"></div>' +
     "</div>" +
-    '<p class="muted" style="font-size:13px;margin:0">Your next invoice will be <strong>' + esc(nextInvoiceNumber()) + "</strong>.</p>" +
+    '<p class="muted" style="font-size:16px;margin:0">Your next invoice will be <strong>' + esc(nextInvoiceNumber()) + "</strong>.</p>" +
     "</div>" +
 
     '<div class="card card-pad stack">' +
@@ -4403,7 +4632,7 @@ VIEWS.settings = function () {
 
     '<div class="card card-pad stack">' +
     '<p class="card-title">Local shows (Edmtrain)</p>' +
-    '<p class="muted" style="font-size:13.5px;margin-top:0">Edmtrain publishes a free API for ' +
+    '<p class="muted" style="font-size:16px;margin-top:0">Edmtrain publishes a free API for ' +
     "personal use. Request a key, paste it here, and the Local Events calendar fills with " +
     "upcoming shows near you.</p>" +
     '<div class="field"><label>API key <span class="hint">' +
@@ -4421,13 +4650,13 @@ VIEWS.settings = function () {
     '<div class="card card-pad">' +
     '<p class="card-title">Artist database</p>' +
     (window.ARTIST_STATS
-      ? '<p class="muted" style="font-size:13.5px;margin-top:0"><strong>' +
+      ? '<p class="muted" style="font-size:16px;margin-top:0"><strong>' +
         window.ARTIST_STATS.acts + "</strong> acts across <strong>" +
         window.ARTIST_STATS.festivals + "</strong> lineups, <strong>" +
         window.ARTIST_STATS.reachable + "</strong> with an address on file.</p>"
-      : '<p class="muted" style="font-size:13.5px;margin-top:0">Not imported yet. ' +
+      : '<p class="muted" style="font-size:16px;margin-top:0">Not imported yet. ' +
         "The Outreach tab shows only lineups you've added by hand until it is.</p>") +
-    '<p class="muted" style="font-size:13px">Stored in your account, never in the ' +
+    '<p class="muted" style="font-size:16px">Stored in your account, never in the ' +
     "repo \u2014 this site is public, so a file here would publish every address in it. " +
     "Generate the file with <code>python3 tools/gen_artists_js.py --apply</code>.</p>" +
     '<button type="button" class="btn" data-act="import-artists">' +
@@ -4436,12 +4665,12 @@ VIEWS.settings = function () {
 
     '<div class="card card-pad">' +
     '<p class="card-title">Your data</p>' +
-    '<p class="muted" style="font-size:12.5px;margin:0 0 12px">Build <strong id="build-stamp">' +
+    '<p class="muted" style="font-size:15px;margin:0 0 12px">Build <strong id="build-stamp">' +
     esc(BUILD) + "</strong> \u2014 quote this if something looks out of date.</p>" +
-    '<p class="muted" style="font-size:13.5px;margin-top:0">Everything lives in <code>data.json</code> inside the ' +
+    '<p class="muted" style="font-size:16px;margin-top:0">Everything lives in <code>data.json</code> inside the ' +
     "<code>income-tracker</code> folder. A dated copy is tucked into <code>backups/</code> the first time you " +
     "change anything each day.</p>" +
-    '<p class="muted" style="font-size:13px;margin:0 0 12px">Signed in as <strong>' +
+    '<p class="muted" style="font-size:16px;margin:0 0 12px">Signed in as <strong>' +
     esc((Cloud.session && Cloud.session.email) || "") + "</strong>. " +
     'Your records sync to every device you sign in on.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
@@ -4835,10 +5064,12 @@ document.addEventListener("click", (e) => {
     case "toggle-todo": toggleTodo(id); break;
     case "delete-todo":
       e.preventDefault();
+      bankXP((DB.todos || []).filter((x) => x.id === id));
       DB.todos = (DB.todos || []).filter((x) => x.id !== id);
       save(); refreshTodoList();
       break;
     case "clear-done":
+      bankXP(DB.todos || []);
       DB.todos = (DB.todos || []).filter((x) => !x.done);
       save(); refreshTodoList();
       break;
@@ -5165,8 +5396,8 @@ async function start() {
     $("#view").innerHTML =
       '<div class="card card-pad" style="margin-top:40px;max-width:560px;margin-left:auto;margin-right:auto">' +
       '<h3 style="margin-top:0">Could not load your data</h3>' +
-      '<p style="font-size:14px;line-height:1.5">' + esc(err.message) + "</p>" +
-      '<table style="font-size:13px;margin:16px 0"><tbody>' +
+      '<p style="font-size:17px;line-height:1.5">' + esc(err.message) + "</p>" +
+      '<table style="font-size:16px;margin:16px 0"><tbody>' +
       Object.keys(d).map((k) =>
         "<tr><td style=\"color:var(--ink-3);padding-right:14px\">" + esc(k) + "</td>" +
         "<td><code>" + esc(String(d[k])) + "</code></td></tr>").join("") +

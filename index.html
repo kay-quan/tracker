@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Income Tracker</title>
-<link rel="stylesheet" href="styles.css?v=56">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Nunito:wght@700;800&display=swap">
+<link rel="stylesheet" href="styles.css?v=57">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128200;</text></svg>">
 </head>
 <body>
@@ -14,6 +17,7 @@
     <div class="appbar-top">
       <h1 class="app-title" id="app-title">Income Tracker</h1>
       <span class="save-state" id="save-state" aria-live="polite"></span>
+      <div class="hud" id="hud"></div>
       <button class="icon-btn" data-act="goto" data-view="settings" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
     <div class="app-meta" id="app-meta"></div>
@@ -27,7 +31,7 @@
 <div id="modal-root"></div>
 <div id="invoice-print"></div>
 
-<script src="cloud.js?v=56"></script>
-<script src="app.js?v=56"></script>
+<script src="cloud.js?v=57"></script>
+<script src="app.js?v=57"></script>
 </body>
 </html>

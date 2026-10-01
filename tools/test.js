@@ -99,7 +99,7 @@ let app = read("app.js").replace(
   "  followersOf, instagramOf, fmtFollowers, inBand, FOLLOWER_BANDS,\n" +
   "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
-  "  personalDays, spanLabel,\n" +
+  "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -942,6 +942,53 @@ t("the span label reads as a range only when there is one", () => {
   if (l.indexOf("–") < 0) throw new Error("expected a range, got: " + l);
   eq(T.spanLabel({ date: "2026-09-20", endDate: "2026-09-20" }), "",
      "same day both ends is not a range");
+});
+
+/* ---------- the game: XP, levels, streak ---------- */
+
+const doneOn = (id, day, xp) => ({ id: id, text: id, done: true, doneAt: day, xp: xp });
+
+t("XP adds up finished tasks, 20 each unless set", () => {
+  const db = T.defaultData();
+  db.todos = [doneOn("a", "2026-09-01"), doneOn("b", "2026-09-01", 35),
+              { id: "c", text: "c", done: false, xp: 100 }];
+  T.setDB(db);
+  eq(T.gameStats().totalXP, 55, "open tasks earn nothing yet");
+});
+
+t("a level costs XP_PER_LEVEL, and the bar restarts at each level", () => {
+  const db = T.defaultData();
+  db.todos = [doneOn("a", "2026-09-01", T.XP_PER_LEVEL - 10)];
+  T.setDB(db);
+  eq(T.gameStats().level, 1, "just short");
+  db.todos.push(doneOn("b", "2026-09-02", 30));
+  const g = T.gameStats();
+  eq(g.level, 2, "over the line");
+  eq(g.xpIntoLevel, 20, "carry-over into the new level");
+});
+
+t("streak counts consecutive days and resets after a missed one", () => {
+  const days = new Set(["2026-09-28", "2026-09-29", "2026-09-30"]);
+  eq(T.streakFrom(days, "2026-09-30T12:00:00"), 3, "done today");
+  eq(T.streakFrom(days, "2026-10-01T09:00:00"), 3, "today not over yet: yesterday's run holds");
+  eq(T.streakFrom(days, "2026-10-02T09:00:00"), 0, "a whole day missed");
+  eq(T.streakFrom(new Set(["2026-09-28", "2026-09-30"]), "2026-09-30T12:00:00"), 1, "gap breaks it");
+});
+
+t("deleting a finished task keeps its XP and its streak day", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [doneOn("a", "2026-09-01", 40), { id: "b", text: "b", done: false }];
+  T.setDB(db);
+  T.bankXP(db.todos);
+  db.todos = db.todos.filter((x) => !x.done);
+  eq(T.gameStats().totalXP, 40, "XP survives the delete");
+  eq(db.game.bankedDays.join(), "2026-09-01", "the day is kept for the streak");
+});
+
+t("old data with no game section loads with an empty one", () => {
+  const db = T.withDefaults({ settings: {} });
+  eq(db.game.bankedXP, 0);
+  eq(Array.isArray(db.game.bankedDays), true, "bankedDays is a list");
 });
 
 /* ---------- report ---------- */
