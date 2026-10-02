@@ -4210,6 +4210,107 @@ body { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
 }
 
 
+/* ---------- the Today sidebar: Gachapon, boss, reward ---------- */
+
+.side-card h2 { font-family: var(--font); font-weight: 700; font-size: 22px; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.roll-card { text-align: left; }
+.gacha-pic, .boss-pic {
+  height: 120px;
+  display: flex; align-items: flex-end; justify-content: center;
+  margin: -4px 0 10px;
+  overflow: hidden;
+  background: var(--map-bg);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+.gacha-pic img, .boss-pic img { max-height: 112px; max-width: 92%; image-rendering: pixelated; }
+.roll-card.spun .gacha-pic img { animation: gacha-shake 0.5s ease-in-out; }
+@keyframes gacha-shake { 20% { transform: rotate(-6deg); } 40% { transform: rotate(6deg); } 60% { transform: rotate(-4deg); } 80% { transform: rotate(3deg); } }
+.rolled-kicker { margin: 0 0 6px !important; font-weight: 700; color: var(--ink-2); }
+.rolled {
+  padding: 10px 12px;
+  background: #FFFFFF;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #C3C9D1;
+}
+.rolled-title { margin: 0 0 6px !important; font-weight: 700; font-size: 19px !important; line-height: 1.3; }
+.roll-card.spun .rolled { animation: lu-pop 0.4s cubic-bezier(.3, 1.6, .5, 1); }
+.boss-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; font-weight: 700; font-size: 15px; }
+.reward-card { background: var(--silver); }
+.reward-card h2 { color: var(--ink); }
+.reward-card .side-line, .reward-card p { color: var(--ink-2); }
+.reward-card.ready { background: linear-gradient(#FFFEF2, #FFF2B0); }
+.meter-reward { background: #3A404A; }
+.meter-reward .meter-fill { background-color: #F2DC00; }
+
+/* the boss picker and step list */
+.boss-looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.boss-look {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px;
+  font-weight: 700; font-size: 13px; text-align: center;
+  background: var(--grey);
+  border: 2px solid var(--grey-edge);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.boss-look input { position: absolute; opacity: 0; pointer-events: none; }
+.boss-look:has(input:checked) { background: var(--orange); border-color: var(--orange-edge); color: #FFFFFF; text-shadow: var(--orange-text); }
+.boss-look:has(input:focus-visible) { outline: 3px solid #F28A0C; outline-offset: 2px; }
+.boss-look-pic { height: 70px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.boss-look-pic img { max-height: 70px; max-width: 84px; image-rendering: pixelated; }
+.boss-steps { margin: 0; padding-left: 20px; font-size: 17px; }
+.boss-steps li.done { color: var(--ink-3); text-decoration: line-through; }
+.boss-art img { max-width: 88px; max-height: 88px; image-rendering: pixelated; }
+
+/* ---------- the stat key ---------- */
+
+.stat-guide { padding: 8px 18px 16px; }
+.guide-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.guide-row .stat-icon { grid-area: auto; width: 40px; height: 40px; font-size: 21px; background: var(--stat); display: inline-flex; align-items: center; justify-content: center; }
+.guide-text { grid-area: auto; min-width: 0; }
+.guide-text p { margin: 0; }
+.guide-head { font-size: 18px; font-weight: 700; margin-bottom: 4px !important; }
+.guide-head .stat-name { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.guide-eg { font-size: 17px; line-height: 1.45; }
+.guide-auto { font-size: 15px; color: var(--ink-3); margin-top: 4px !important; }
+.guide-prio { padding-top: 12px; }
+.guide-prio ul { margin: 6px 0 0; padding-left: 20px; font-size: 17px; }
+.guide-prio li { margin-bottom: 4px; }
+
+/* ---------- the world map ---------- */
+
+button.minimap { cursor: pointer; }
+button.minimap:hover { background: rgba(14, 18, 26, 0.9); border-color: #FFD800; }
+.minimap-go { font-size: 12px; opacity: 0.8; }
+.loot-world { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 16px; color: var(--ink-2); }
+.world-lede { margin: 0 0 14px; font-size: 17px; }
+.world { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.town {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 6px 10px;
+  background: #FFFFFF;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #C3C9D1;
+}
+.town.here { box-shadow: inset 0 0 0 3px #F28A0C; }
+.town-pic { display: block; width: 100%; height: 76px; border-radius: 6px; }
+.town.locked .town-pic { filter: grayscale(1) brightness(0.6); }
+.town-name { font-weight: 700; font-size: 16px; }
+.town-lv { font-size: 14px; color: var(--ink-3); font-weight: 700; }
+.town-here { font-weight: 700; font-size: 14px; color: #B85E00; }
+.town-lock { font-size: 14px; color: var(--ink-3); }
+.town .btn { align-self: flex-start; }
+
 /* ---------- readability ----------
    The pixel lettering only reads at 16px and up, so it's kept for titles,
    plates and buttons. Every small label is plain bold instead, at a size a
@@ -4358,4 +4459,71 @@ body[data-backdrop="bg-sunburst"], .bd-swatch[data-bd="bg-sunburst"] {
     url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/skyStation.img/back/1") left top / auto 100% repeat-x,
     var(--map) center bottom / cover no-repeat,
     #1E4FB0;
+}
+/* Sleepywood */
+body[data-backdrop="map-sleepywood"], .bd-swatch[data-bd="map-sleepywood"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/darkWood.img/back/7") 4% bottom / auto 100% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/darkWood.img/back/1") 88% bottom / auto 100% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/darkWood.img/back/0") left bottom / auto 70% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #12170C;
+}
+/* Nautilus Harbor */
+body[data-backdrop="map-nautilus"], .bd-swatch[data-bd="map-nautilus"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/nautilusPort.img/back/6") 88% 84% / auto 34% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/nautilusPort.img/back/5") left bottom / auto 30% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/nautilusPort.img/back/3") center 16% / auto 26% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/nautilusPort.img/back/1") left top / auto 100% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #6EC6FF;
+}
+/* El Nath */
+body[data-backdrop="map-elnath"], .bd-swatch[data-bd="map-elnath"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/snowyLightrock.img/back/3") left bottom / auto 52% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/snowyLightrock.img/back/4") 62% 66% / auto 46% no-repeat,
+    linear-gradient(#5F8FD0, #D6E7F8) 0 0 / 100% 100% no-repeat,
+    var(--map) center bottom / cover no-repeat,
+    #9FC3E8;
+}
+/* Ariant */
+body[data-backdrop="map-ariant"], .bd-swatch[data-bd="map-ariant"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/desert.img/back/7") left bottom / auto 30% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/desert.img/back/22") 86% 10% / auto 36% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/desert.img/back/2") center 22% / auto 18% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/desert.img/back/1") left top / auto 100% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #BFE6F7;
+}
+/* Aquarium */
+body[data-backdrop="map-aquarium"], .bd-swatch[data-bd="map-aquarium"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/aquaRoad.img/back/5") left bottom / auto 52% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/aquaRoad.img/back/3") left 72% / auto 44% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/aquaRoad.img/back/1") left top / auto 100% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #1B3E9A;
+}
+/* Leafre */
+body[data-backdrop="map-leafre"], .bd-swatch[data-bd="map-leafre"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/minar.img/back/14") 72% bottom / auto 70% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/minar.img/back/11") 0% bottom / auto 60% no-repeat,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/minar.img/back/8") center bottom / auto 56% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/minar.img/back/1") left top / auto 100% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #8FD3F5;
+}
+/* Mu Lung */
+body[data-backdrop="map-mulung"], .bd-swatch[data-bd="map-mulung"] {
+  --map-bg:
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/mureung.img/back/12") center bottom / auto 40% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/mureung.img/back/3") center bottom / auto 72% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/mureung.img/back/2") center 8% / auto 36% repeat-x,
+    url("https://maplestory.io/api/wz/img/GMS/95/Map/Back/mureung.img/back/1") left top / auto 100% repeat-x,
+    var(--map) center bottom / cover no-repeat,
+    #A7DBF5;
 }

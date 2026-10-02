@@ -105,7 +105,7 @@ let app = read("app.js").replace(
   "  STATS, PRIORITIES, statSheet, streakMult, statLevel, guessStat, statOf, prioOf, earnedXP,\n" +
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
   "  heroTitle, addDays, avatarOf, avatarItems, avatarURL, weaponActions, closetBase, closetName,\n" +
-  "  closetWear, AVATAR_DEFAULT,\n" +
+  "  closetWear, AVATAR_DEFAULT, bossProgress, rewardProgress, mapOpen, WORLD, STAT_GUIDE, STAT_WORDS,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1350,6 +1350,75 @@ t("every monster carries the game's own id, once", () => {
     ids.add(m.id);
   });
   eq(T.MOBS[6].name, "Stump", "picks are saved by position, so the first eight keep their places");
+});
+
+/* ---------- bosses, rewards, the world map ---------- */
+
+t("a boss falls on its last step, once, with a guaranteed drop", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.game.bosses = [{ id: "b1", name: "Portfolio relaunch", look: 2220000, defeatedAt: null, paid: false, cleared: 0 }];
+  db.todos = [{ id: "s1", text: "Pick shots", boss: "b1", stat: "craft", done: true, doneAt: dayAgo(1), earned: { xp: 25 }, rolled: true },
+              { id: "s2", text: "Rewrite about", boss: "b1", stat: "craft", done: false }];
+  T.setDB(db);
+  let pr = T.bossProgress(db.game.bosses[0]);
+  eq(pr.total, 2); eq(pr.left, 1); eq(pr.next.id, "s2");
+  const s2 = db.todos[1]; s2.done = true; s2.doneAt = dayAgo(0);
+  const drops = T.awardTask(s2, never);
+  eq(drops.filter((d) => d.item.kind === "boss").length, 1, "the boss celebration");
+  if (drops.filter((d) => d.item.kind !== "boss" && d.item.kind !== "badge").length !== 1) throw new Error("no guaranteed bonus drop");
+  eq(db.game.bosses[0].defeatedAt, dayAgo(0));
+  s2.done = false; db.game.bosses[0].defeatedAt = null;        // un-ticked: back on its feet
+  s2.done = true;
+  eq(T.awardTask(s2, never).filter((d) => d.item.kind === "boss").length, 0, "paid once only");
+});
+
+t("deleting a finished boss step still counts as a hit", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.game.bosses = [{ id: "b1", name: "B", look: 1, cleared: 0 }];
+  db.todos = [{ id: "s1", text: "a", boss: "b1", done: true, doneAt: "2026-09-01" }, { id: "s2", text: "b", boss: "b1", done: false }];
+  T.setDB(db);
+  T.bankXP(db.todos.filter((x) => x.done));
+  db.todos = db.todos.filter((x) => !x.done);
+  const pr = T.bossProgress(db.game.bosses[0]);
+  eq(pr.total, 2); eq(pr.done, 1);
+});
+
+t("a reward counts quests from the day it was set, not before", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.game.reward = { name: "Sushi night", icon: "🍣", cost: 3, since: dayAgo(0), base: 1, banked: 0 };
+  db.todos = [{ id: "a", done: true, doneAt: dayAgo(1) }, { id: "b", done: true, doneAt: dayAgo(0) },
+              { id: "c", done: true, doneAt: dayAgo(0) }];
+  T.setDB(db);
+  let pr = T.rewardProgress();
+  eq(pr.have, 1, "yesterday's doesn't count, and b was done before the reward was set");
+  db.todos.push({ id: "d", done: true, doneAt: dayAgo(0) }, { id: "e", done: true, doneAt: dayAgo(0) });
+  pr = T.rewardProgress();
+  eq(pr.have, 3); eq(pr.ready, true);
+});
+
+t("towns open by hero level, or early as loot; Henesys is always open", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.setDB(db);
+  eq(T.mapOpen("", 1), true);
+  eq(T.mapOpen("bg-dots", 1), false, "Ellinia is Lv.3");
+  eq(T.mapOpen("bg-dots", 3), true);
+  eq(T.mapOpen("map-mulung", 20), false);
+  db.game.loot.owned["map-mulung"] = { n: 1 };
+  eq(T.mapOpen("map-mulung", 1), true, "found as loot");
+  eq(T.mapOpen("not-a-town", 99), false);
+  const ids = new Set();
+  T.WORLD.forEach((m, i) => {
+    if (ids.has(m.id)) throw new Error("duplicate town " + m.name);
+    ids.add(m.id);
+    if (i && m.level < T.WORLD[i - 1].level) throw new Error("towns out of level order at " + m.name);
+  });
+});
+
+t("the stat key covers every stat", () => {
+  T.STATS.forEach((x) => {
+    if (!T.STAT_GUIDE[x.id] || !T.STAT_GUIDE[x.id].examples) throw new Error("no guide for " + x.name);
+    if (!T.STAT_WORDS[x.id].length) throw new Error("no Auto words for " + x.name);
+  });
 });
 
 /* ---------- report ---------- */

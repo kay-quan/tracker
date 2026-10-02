@@ -378,11 +378,6 @@ const XP_PER_LEVEL = 500;
    then keep what they earned: their own number, or this if they had none. */
 const DEFAULT_XP = 20;
 
-/* Sample content for the boss and reward cards until step 4 gives them real data. */
-const GAME_SAMPLE = {
-  boss: { name: "Portfolio relaunch", done: 6, steps: 10, next: "Pick 12 hero shots" },
-  reward: { name: "Sushi night", have: 7, cost: 10 },
-};
 
 /* ---------- the five stats ----------
    Every task trains one stat. Each stat has its own level, XP bar and streak, and
@@ -395,6 +390,15 @@ const STATS = [
   { id: "mind",     name: "Mind",     icon: "🧠", color: "#FF6FB0", what: "Learning and admin" },
 ];
 const STAT_IDS = STATS.map((s) => s.id);
+
+// What belongs in each stat, for the key on the Personal tab.
+const STAT_GUIDE = {
+  hustle: { short: "reselling", examples: "Sourcing finds, photographing and listing items, answering buyers, packing and shipping orders, tracking inventory and sales." },
+  craft: { short: "photo & video", examples: "Shoots, culling and editing, delivering galleries, replying to clients, quotes and invoices, pitching venues and artists, portfolio updates." },
+  empire: { short: "digital products", examples: "Making presets, LUTs and templates, product pages and the online store, launches, and the emails and posts that sell them." },
+  vitality: { short: "health & personal", examples: "Workouts and walks, meals and groceries, sleep, appointments, laundry and cleaning, errands, time with people." },
+  mind: { short: "learning & admin", examples: "Reading, courses and tutorials, practising a skill, taxes, bills and banking, insurance and renewals, paperwork and research." },
+};
 const statById = (id) => STATS.find((s) => s.id === id) || STATS[1];
 
 /* XP comes from priority, not from how big a task is. Booked things happen anyway,
@@ -497,6 +501,8 @@ function normGame(g) {
   if (!l.equip || typeof l.equip !== "object") l.equip = {};
   if (!Array.isArray(l.runs)) l.runs = [];
   if (!Array.isArray(l.recent)) l.recent = [];
+  if (!Array.isArray(g.bosses)) g.bosses = [];
+  if (!Array.isArray(g.rewardsClaimed)) g.rewardsClaimed = [];
   return g;
 }
 const gameData = () => (DB.game = normGame(DB.game));
@@ -579,6 +585,9 @@ function bankXP(tasks) {
     if (!Array.isArray(b.days)) b.days = [];
     if (t.doneAt && g.bankedDays.indexOf(t.doneAt) < 0) g.bankedDays.push(t.doneAt);
     if (t.doneAt && b.days.indexOf(t.doneAt) < 0) b.days.push(t.doneAt);
+    const boss = t.boss && g.bosses.find((x) => x.id === t.boss);
+    if (boss) boss.cleared = num(boss.cleared) + 1;
+    if (g.reward && t.doneAt && t.doneAt >= g.reward.since) g.reward.banked = num(g.reward.banked) + 1;
   });
 }
 
@@ -598,7 +607,7 @@ const RARITY = {
   epic:   { name: "Epic",   weight: 1 },
 };
 
-const LOOT_KINDS = { title: "Medal", bar: "Gauge skin", backdrop: "Map", badge: "Badge", chest: "Bonus EXP" };
+const LOOT_KINDS = { title: "Medal", bar: "Gauge skin", backdrop: "Map", badge: "Badge", chest: "Bonus EXP", boss: "Boss" };
 
 // The random drops. Equip them on the Personal tab. Titles show as medals.
 const LOOT = [
@@ -632,6 +641,13 @@ const LOOT = [
   { id: "bg-checker",  kind: "backdrop", rarity: "rare",   name: "Lith Harbor" },
   { id: "bg-confetti", kind: "backdrop", rarity: "epic",   name: "Ludibrium" },
   { id: "bg-sunburst", kind: "backdrop", rarity: "epic",   name: "Orbis" },
+  { id: "map-sleepywood", kind: "backdrop", rarity: "rare", name: "Sleepywood" },
+  { id: "map-nautilus",   kind: "backdrop", rarity: "rare", name: "Nautilus Harbor" },
+  { id: "map-elnath",     kind: "backdrop", rarity: "epic", name: "El Nath" },
+  { id: "map-ariant",     kind: "backdrop", rarity: "epic", name: "Ariant" },
+  { id: "map-aquarium",   kind: "backdrop", rarity: "epic", name: "Aquarium" },
+  { id: "map-leafre",     kind: "backdrop", rarity: "epic", name: "Leafre" },
+  { id: "map-mulung",     kind: "backdrop", rarity: "epic", name: "Mu Lung" },
 ];
 
 // Titles only long streaks can earn, one set per stat.
@@ -720,6 +736,20 @@ function awardTask(t, rng) {
     if (title && !l.owned[title.id]) drops.push(grantLoot(title, today));
   });
 
+  // The last step of a boss fight brings it down: a celebration and a guaranteed drop.
+  const boss = t.boss && bossById(t.boss);
+  if (boss && !boss.defeatedAt && bossProgress(boss).left === 0) {
+    boss.defeatedAt = today;
+    if (!boss.paid) {
+      boss.paid = true;
+      drops.push({ item: { id: "boss-" + boss.id, kind: "boss", rarity: "epic", name: boss.name, look: boss.look } });
+      let first = true;
+      const sure = () => (first ? (first = false, 0) : (rng || Math.random)());
+      const bonus = rollLoot(sure);
+      if (bonus && bonus.kind !== "chest") drops.push(grantLoot(bonus, today));
+    }
+  }
+
   if (!t.rolled) {
     t.rolled = true;
     const item = rollLoot(rng);
@@ -744,18 +774,44 @@ function heroTitle() {
   return item ? item.name : "";
 }
 
-// The equipped bar skin and backdrop, as attributes the stylesheet reads.
+/* ---------- the world map ----------
+   Every town opens at its hero level, as the game's do, or sooner if it drops as
+   loot. Henesys is home. */
+const WORLD = [
+  { id: "", name: "Henesys", level: 1 },
+  { id: "bg-dots", name: "Ellinia", level: 3 },
+  { id: "bg-diagonal", name: "Perion", level: 5 },
+  { id: "bg-grid", name: "Kerning City", level: 8 },
+  { id: "bg-checker", name: "Lith Harbor", level: 10 },
+  { id: "map-sleepywood", name: "Sleepywood", level: 12 },
+  { id: "map-nautilus", name: "Nautilus Harbor", level: 14 },
+  { id: "bg-sunburst", name: "Orbis", level: 16 },
+  { id: "map-elnath", name: "El Nath", level: 20 },
+  { id: "bg-confetti", name: "Ludibrium", level: 24 },
+  { id: "map-ariant", name: "Ariant", level: 26 },
+  { id: "map-aquarium", name: "Aquarium", level: 28 },
+  { id: "map-leafre", name: "Leafre", level: 32 },
+  { id: "map-mulung", name: "Mu Lung", level: 36 },
+];
+
+function mapOpen(id, level) {
+  const m = WORLD.find((x) => x.id === (id || ""));
+  if (!m) return false;
+  const owned = ((DB && DB.game && DB.game.loot) || {}).owned || {};
+  return !m.id || !!owned[m.id] || (level || gameStats().level) >= m.level;
+}
+
+// The equipped bar skin and map, as attributes the stylesheet reads.
 function applyCosmetics() {
   const l = (DB && DB.game && DB.game.loot) || {};
   const eq = l.equip || {}, owned = l.owned || {};
-  const on = (id) => (id && owned[id] ? id : "");
-  document.body.dataset.bar = on(eq.bar);
-  document.body.dataset.backdrop = on(eq.backdrop);
+  document.body.dataset.bar = eq.bar && owned[eq.bar] ? eq.bar : "";
+  document.body.dataset.backdrop = eq.backdrop && mapOpen(eq.backdrop) ? eq.backdrop : "";
 }
 
 function equipLoot(kind, id) {
   const l = gameData().loot;
-  if (id && !l.owned[id]) return;
+  if (id && (kind === "backdrop" ? !mapOpen(id) : !l.owned[id])) return;
   l.equip[kind] = id || "";
   save();
   render();
@@ -782,8 +838,8 @@ function renderHud() {
 function mapName() {
   const l = (DB.game && DB.game.loot) || {};
   const id = l.equip && l.equip.backdrop;
-  const item = id && l.owned && l.owned[id] ? lootItem(id) : null;
-  return item ? item.name : "Henesys";
+  const m = id && mapOpen(id) ? WORLD.find((x) => x.id === id) : null;
+  return m ? m.name : "Henesys";
 }
 
 function renderHeader() {
@@ -797,7 +853,8 @@ function renderHeader() {
 
   // Today is the game screen: the greeting, the HUD, and the map's name.
   if (state.view === "today") {
-    $("#app-meta").innerHTML = '<span class="minimap"><span aria-hidden="true">🍁</span> ' + esc(mapName()) + "</span>";
+    $("#app-meta").innerHTML = '<button type="button" class="minimap" data-act="world-map" title="World map: travel to another town">' +
+      '<span aria-hidden="true">🍁</span> ' + esc(mapName()) + ' <span class="minimap-go" aria-hidden="true">\u25be</span></button>';
     return;
   }
 
@@ -1288,6 +1345,15 @@ function questCard(t, o) {
     "</div></div></div>";
 }
 
+// A task can be one step of a boss fight. Only shown once there's a boss to join.
+function bossField(t) {
+  const bosses = ((DB.game && DB.game.bosses) || []).filter((b) => !b.defeatedAt || b.id === t.boss);
+  if (!bosses.length) return "";
+  return '<div class="field"><label>Boss <span class="hint">finishing this hits it</span></label>' +
+    '<select name="boss">' + selectOptions(bosses.map((b) => ({ value: b.id, label: b.name })), t.boss || "", "\u2014 none \u2014") +
+    "</select></div>";
+}
+
 // Radio buttons drawn as the chunky option chips. They're real radios, so the form
 // reads them and the keyboard moves between them.
 function radioChips(name, labelledBy, items, selected) {
@@ -1311,12 +1377,15 @@ function taskForm(rec) {
     "</div>" +
     '<div class="field"><label id="lbl-stat">Stat <span class="hint">what this trains</span></label>' +
     radioChips("stat", "lbl-stat", STATS.map((x) => ({ value: x.id, label: x.icon + " " + x.name })),
-      t.id ? statOf(t) : (state.addStat || "")) + "</div>" +
+      t.id ? statOf(t) : (state.addStat || "")) +
+    '<p class="field-note">' + STATS.map((x) => "<strong>" + x.name + "</strong> " + STAT_GUIDE[x.id].short).join(" \u00b7 ") +
+    "</p></div>" +
     '<div class="field"><label id="lbl-prio">Priority <span class="hint">EXP comes from priority, not size</span></label>' +
     radioChips("prio", "lbl-prio", PRIORITIES.map((p) => ({ value: p.id,
       label: (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " EXP" })), prioOf(t)) +
     '<p class="field-note">' + PRIORITIES.map((p) => "<strong>" + p.name + ":</strong> " + esc(p.hint.toLowerCase()))
       .join(" \u00b7 ") + "</p></div>" +
+    bossField(t) +
     '<div class="field"><label>Notes <span class="hint">the detail you\u2019d otherwise forget</span></label>' +
     '<textarea name="notes" rows="6">' + esc(t.notes || "") + "</textarea></div>" +
     "</form>";
@@ -1337,6 +1406,10 @@ function saveTask(id) {
     text: v.text.trim(), category: v.category, due: v.due, notes: v.notes.trim(),
     prio: prioById(v.prio || prioOf(rec)).id,
   });
+  if (v.boss !== undefined) {
+    if (v.boss && bossById(v.boss)) { rec.boss = v.boss; if (!rec.done) bossById(v.boss).defeatedAt = null; }
+    else delete rec.boss;
+  }
   // No stat picked: guess from the words and category just saved.
   rec.stat = STAT_IDS.indexOf(v.stat) >= 0 ? v.stat : guessStat(rec);
   if (!existing) DB.todos.push(rec);
@@ -1519,6 +1592,8 @@ function toggleTodo(id) {
     drops = awardTask(t);
   } else {
     delete t.earned;                   // re-earned at the day's rate if ticked again
+    const boss = t.boss && bossById(t.boss);
+    if (boss) boss.defeatedAt = null;  // back on its feet (its drop was already paid)
   }
   save();
   refreshTodoList();
@@ -1664,12 +1739,14 @@ function celebrateDrop(d) {
   const it = d.item;
   const wearable = it.kind === "title" || it.kind === "bar" || it.kind === "backdrop";
   const kicker = it.kind === "badge" ? "Streak milestone!"
+    : it.kind === "boss" ? "Boss defeated!"
     : it.kind === "chest" ? "Treasure chest!" : "Loot drop!";
   sysMsg("You have acquired " + it.name + ".", "item");
   const sub = '<p class="drop-tags"><span class="tag tag-' + it.rarity + '">' + RARITY[it.rarity].name + "</span>" +
     '<span class="tag">' + LOOT_KINDS[it.kind] + "</span>" +
     (d.again ? '<span class="tag">Earned again</span>' : "") + "</p>" +
-    (it.kind === "chest" ? '<p class="drop-note">You\u2019ve found everything, so bonus rolls pay EXP now.</p>' : "");
+    (it.kind === "chest" ? '<p class="drop-note">You\u2019ve found everything, so bonus rolls pay EXP now.</p>' : "") +
+    (it.kind === "boss" ? '<p class="drop-note">Every step done. It dropped a guaranteed bonus.</p>' : "");
   celebrate({
     stay: true, drop: true, rarity: it.rarity, kicker: kicker, big: it.name, art: lootArt(it), sub: sub,
     statColor: it.stat ? statById(it.stat).color : "",
@@ -1682,6 +1759,9 @@ function celebrateDrop(d) {
 
 // A picture of an item: a medal, a scroll, a little bar, a backdrop swatch.
 function lootArt(it) {
+  if (it.kind === "boss") {
+    return '<span class="drop-art boss-art" aria-hidden="true"><img src="' + mobImg({ id: it.look }, "die1") + '" alt=""></span>';
+  }
   if (it.kind === "badge") return medalHTML(it, true);
   if (it.kind === "bar") {
     return '<div class="meter meter-xp meter-stat skin-preview drop-art-bar" data-skin="' + it.id +
@@ -2734,6 +2814,264 @@ function heroSave() {
 }
 
 /* ============================================================
+   GACHAPON, BOSSES, REWARDS AND THE WORLD MAP
+   ============================================================ */
+
+/* ---------- the Gachapon ----------
+   Can't decide? It picks an open quest for you, leaning towards urgent and
+   overdue ones, so the pick is usually the one worth doing. */
+function rollQuest() {
+  const today = todayISO();
+  const pool = (DB.todos || []).filter((t) => !t.done && !t.top && t.id !== state.rolled);
+  if (!pool.length) { state.rolled = null; state.rollEmpty = true; render(); return; }
+  const weight = (t) => ({ urgent: 3, regular: 2, booked: 1 }[prioOf(t)] || 2) + (t.due && t.due < today ? 2 : 0);
+  let pick = Math.random() * pool.reduce((n, t) => n + weight(t), 0);
+  let chosen = pool[pool.length - 1];
+  for (let i = 0; i < pool.length; i++) { pick -= weight(pool[i]); if (pick < 0) { chosen = pool[i]; break; } }
+  state.rolled = chosen.id;
+  state.rollEmpty = false;
+  render();
+  const card = $(".roll-card");
+  if (card) card.classList.add("spun");
+}
+
+function gachaponCard() {
+  const t = state.rolled && (DB.todos || []).find((x) => x.id === state.rolled && !x.done && !x.top);
+  if (!t) state.rolled = null;
+  return '<section class="card side-card roll-card">' +
+    '<div class="gacha-pic" aria-hidden="true"><img src="' + msURL("npc/9100100/render/stand") + '" alt=""></div>' +
+    "<h2>Can’t decide?</h2>" +
+    (t
+      ? '<p class="rolled-kicker">The Gachapon picked:</p><div class="rolled"><p class="rolled-title">' + esc(t.text) +
+        '</p><div class="taskmeta">' + taskMeta(t) + "</div></div>" +
+        '<div class="side-actions"><button class="btn btn-primary" data-act="roll-take" data-id="' + t.id + '">Do this one</button>' +
+        '<button class="btn" data-act="roll">Spin again</button></div>'
+      : "<p>Spin the Gachapon and it picks your next quest, leaning towards the urgent ones.</p>" +
+        (state.rollEmpty ? '<p class="side-line">Nothing left in the quest log to pick. Add a task first.</p>' : "") +
+        '<button class="btn btn-big btn-primary" data-act="roll">🎲 Spin</button>') +
+    "</section>";
+}
+
+/* ---------- bosses ----------
+   A boss is a big goal broken into steps. Every step is an ordinary task in the
+   quest log; finishing one is a hit, and the last one brings the boss down. */
+const BOSS_LOOKS = [
+  { id: 2220000, name: "Mano" }, { id: 3220000, name: "Stumpy" }, { id: 6130101, name: "Mushmom" },
+  { id: 6300005, name: "Zombie Mushmom" }, { id: 9300003, name: "King Slime" }, { id: 6220000, name: "Dyle" },
+  { id: 5220002, name: "Faust" }, { id: 5220001, name: "King Clang" }, { id: 8130100, name: "Jr. Balrog" },
+  { id: 8220000, name: "Eliza" }, { id: 5220003, name: "Timer" }, { id: 8500001, name: "Papulatus" },
+];
+
+const bossById = (id) => ((DB.game && DB.game.bosses) || []).find((b) => b.id === id);
+const bossSteps = (b) => (DB.todos || []).filter((t) => t.boss === b.id);
+const activeBosses = () => ((DB.game && DB.game.bosses) || []).filter((b) => !b.defeatedAt);
+
+function bossProgress(b) {
+  const steps = bossSteps(b);
+  const open = steps.filter((t) => !t.done);
+  const total = steps.length + num(b.cleared);
+  const done = total - open.length;
+  open.sort((x, y) => (y.top ? 1 : 0) - (x.top ? 1 : 0) || (x.due || "9").localeCompare(y.due || "9"));
+  return { total: total, done: done, left: open.length, next: open[0] || null };
+}
+
+function bossCard() {
+  const bosses = activeBosses();
+  if (!bosses.length) {
+    const beaten = ((DB.game && DB.game.bosses) || []).filter((b) => b.defeatedAt).length;
+    return '<section class="card side-card boss-card"><div class="side-top"><span class="tag tag-boss">Boss</span></div>' +
+      "<h2>No boss right now</h2>" +
+      "<p>Turn a big goal (a portfolio relaunch, a product launch) into a boss. Each step you finish is a hit.</p>" +
+      (beaten ? '<p class="side-line">' + beaten + (beaten === 1 ? " boss" : " bosses") + " beaten so far.</p>" : "") +
+      '<button class="btn btn-primary" data-act="boss-new">＋ Start a boss fight</button></section>';
+  }
+  const i = Math.min(num(state.bossIdx), bosses.length - 1);
+  const b = bosses[i];
+  const pr = bossProgress(b);
+  const hp = pr.total ? Math.round(pr.left / pr.total * 100) : 100;
+  return '<section class="card side-card boss-card"><div class="side-top"><span class="tag tag-boss">Boss</span>' +
+    (bosses.length > 1 ? '<span class="boss-nav"><button class="iconbtn" data-act="boss-prev" aria-label="Previous boss">\u2039</button>' +
+      (i + 1) + " / " + bosses.length + '<button class="iconbtn" data-act="boss-next" aria-label="Next boss">\u203a</button></span>' : "") +
+    "</div>" +
+    '<div class="boss-pic" aria-hidden="true"><img src="' + mobImg({ id: b.look }, "stand") + '" alt=""></div>' +
+    "<h2>" + esc(b.name) + "</h2>" +
+    '<div class="meter meter-boss" role="progressbar" aria-label="Boss HP" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + hp + '">' +
+    '<div class="meter-fill" style="width:' + hp + '%"></div></div>' +
+    (pr.total
+      ? '<p class="side-line"><strong>' + pr.done + " of " + pr.total + "</strong> steps done \u00b7 " + hp + "% HP left</p>" +
+        (pr.next ? '<p class="side-line">Next hit: ' + esc(pr.next.text) + "</p>" : "")
+      : '<p class="side-line">No steps yet. Add some and every one you finish is a hit.</p>') +
+    '<div class="side-actions"><button class="btn btn-sm" data-act="boss-edit" data-id="' + b.id + '">Edit steps</button>' +
+    '<button class="btn btn-sm" data-act="boss-new">＋ New boss</button></div></section>';
+}
+
+function bossEditor(id) {
+  const b = id ? bossById(id) : null;
+  const look = b ? b.look : BOSS_LOOKS[0].id;
+  const steps = b ? bossSteps(b) : [];
+  openModal(b ? "Edit boss" : "New boss",
+    '<form id="boss-form">' +
+    '<div class="field"><label for="boss-name">The goal</label>' +
+    '<input id="boss-name" name="name" maxlength="60" value="' + esc(b ? b.name : "") + '" placeholder="Portfolio relaunch" required></div>' +
+    '<div class="field"><label id="lbl-look">Boss</label><div class="boss-looks" role="radiogroup" aria-labelledby="lbl-look">' +
+      BOSS_LOOKS.map((x) => '<label class="boss-look"><input type="radio" name="look" value="' + x.id + '"' +
+        (x.id === look ? " checked" : "") + '><span class="boss-look-pic"><img src="' + mobImg(x, "stand") +
+        '" alt="" loading="lazy"></span><span>' + esc(x.name) + "</span></label>").join("") + "</div></div>" +
+    (steps.length ? '<div class="field"><label>Steps so far</label><ul class="boss-steps">' +
+      steps.map((t) => "<li" + (t.done ? ' class="done"' : "") + ">" + (t.done ? "\u2713 " : "") + esc(t.text) + "</li>").join("") +
+      "</ul></div>" : "") +
+    '<div class="field"><label for="boss-add">' + (steps.length ? "Add more steps" : "Steps") +
+      ' <span class="hint">one per line; each becomes a task in your quest log</span></label>' +
+    '<textarea id="boss-add" name="add" rows="6" placeholder="Pick 12 hero shots\nRewrite the about page\nUpdate the pricing"></textarea></div>' +
+    '<p class="field-note">To add a task you already have, open it with \u270e and pick this boss.</p>' +
+    "</form>",
+    (b ? '<button class="btn btn-danger btn-sm" data-act="boss-delete" data-id="' + b.id + '">Delete boss</button>' : "") +
+    '<div class="spacer"></div><button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="boss-save" data-id="' + (b ? b.id : "") + '">' + (b ? "Save" : "Start the fight") + "</button>");
+}
+
+function bossSave(id) {
+  const v = formValues($("#boss-form"));
+  const name = String(v.name || "").trim();
+  if (!name) { alert("Give the goal a name."); return; }
+  const g = gameData();
+  let b = id ? bossById(id) : null;
+  if (!b) {
+    b = { id: uid(), name: name, look: num(v.look) || BOSS_LOOKS[0].id, created: todayISO(), defeatedAt: null, paid: false, cleared: 0 };
+    g.bosses.push(b);
+  }
+  b.name = name;
+  b.look = num(v.look) || b.look;
+  DB.todos = DB.todos || [];
+  String(v.add || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).forEach((text) => {
+    const t = { id: uid(), text: text.slice(0, 200), done: false, created: todayISO(), doneAt: null,
+                top: false, topRank: null, category: "", due: "", notes: "", prio: "regular", boss: b.id };
+    t.stat = guessStat(t);
+    DB.todos.push(t);
+    b.defeatedAt = null;                 // new steps bring a beaten boss back
+  });
+  state.bossIdx = Math.max(0, activeBosses().indexOf(b));
+  save(); closeModal(); render();
+}
+
+// Deleting a boss keeps its steps as ordinary tasks.
+function bossDelete(id) {
+  confirmDelete("this boss (its steps stay in your quest log)", () => {
+    const g = gameData();
+    g.bosses = g.bosses.filter((b) => b.id !== id);
+    (DB.todos || []).forEach((t) => { if (t.boss === id) delete t.boss; });
+    state.bossIdx = 0;
+    save(); closeModal(); render();
+  });
+}
+
+/* ---------- the next reward ----------
+   Something to treat yourself to after so many finished quests. It counts every
+   quest finished from the day it's set. */
+function rewardProgress() {
+  const r = DB.game && DB.game.reward;
+  if (!r) return null;
+  const done = (DB.todos || []).filter((t) => t.done && t.doneAt && t.doneAt >= r.since).length +
+    num(r.banked) - num(r.base);
+  const cost = Math.max(1, num(r.cost));
+  return { have: Math.max(0, Math.min(cost, done)), cost: cost, ready: done >= cost };
+}
+
+function rewardCard() {
+  const r = DB.game && DB.game.reward;
+  if (!r) {
+    return '<section class="card side-card reward-card"><div class="side-top"><span class="tag tag-reward">Next reward</span></div>' +
+      "<h2>Pick a treat</h2><p>Choose something to work toward (a meal out, a new lens, a day off) and how many quests it costs.</p>" +
+      '<button class="btn btn-primary" data-act="reward-edit">＋ Set a reward</button></section>';
+  }
+  const pr = rewardProgress();
+  const pct = Math.round(pr.have / pr.cost * 100);
+  return '<section class="card side-card reward-card' + (pr.ready ? " ready" : "") + '"><div class="side-top">' +
+    '<span class="tag tag-reward">Next reward</span></div>' +
+    "<h2>" + esc(r.icon || "🎁") + " " + esc(r.name) + "</h2>" +
+    '<div class="meter meter-reward" role="progressbar" aria-label="Quests toward this reward" aria-valuemin="0" aria-valuemax="' +
+      pr.cost + '" aria-valuenow="' + pr.have + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
+    '<p class="side-line"><strong>' + pr.have + " / " + pr.cost + "</strong> quests" +
+      (pr.ready ? " \u00b7 it\u2019s yours!" : " \u00b7 " + (pr.cost - pr.have) + " to go") + "</p>" +
+    '<div class="side-actions">' +
+    (pr.ready ? '<button class="btn btn-primary" data-act="reward-claim">🎉 Claim it</button>' : "") +
+    '<button class="btn btn-sm" data-act="reward-edit">Edit</button></div></section>';
+}
+
+function rewardEditor() {
+  const r = DB.game && DB.game.reward;
+  const claimed = ((DB.game && DB.game.rewardsClaimed) || []).slice(0, 5);
+  openModal(r ? "Edit reward" : "Set a reward",
+    '<form id="reward-form">' +
+    '<div class="field-row"><div class="field" style="flex:0 0 90px"><label for="reward-icon">Icon</label>' +
+    '<input id="reward-icon" name="icon" maxlength="4" value="' + esc(r ? r.icon || "🎁" : "🎁") + '"></div>' +
+    '<div class="field"><label for="reward-name">Treat</label>' +
+    '<input id="reward-name" name="name" maxlength="60" value="' + esc(r ? r.name : "") + '" placeholder="Sushi night" required></div></div>' +
+    '<div class="field"><label for="reward-cost">Costs <span class="hint">finished quests</span></label>' +
+    '<input id="reward-cost" name="cost" type="number" min="1" max="500" value="' + (r ? num(r.cost) : 10) + '"></div>' +
+    (r ? '<p class="field-note">Counting since ' + esc(fmtDate(r.since, { month: "short", day: "numeric" })) + ". Changing the treat or the cost keeps that count.</p>" : "") +
+    (claimed.length ? '<p class="field-note"><strong>Claimed lately:</strong> ' + claimed.map((c) =>
+      esc((c.icon || "🎁") + " " + c.name)).join(" \u00b7 ") + "</p>" : "") +
+    "</form>",
+    (r ? '<button class="btn btn-danger btn-sm" data-act="reward-clear">Remove</button>' : "") +
+    '<div class="spacer"></div><button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="reward-save">Save</button>');
+}
+
+function rewardSave() {
+  const v = formValues($("#reward-form"));
+  const name = String(v.name || "").trim();
+  if (!name) { alert("Name the treat."); return; }
+  const g = gameData();
+  const today = todayISO();
+  if (!g.reward) {
+    // Quests already finished today were earned before this reward existed.
+    const base = (DB.todos || []).filter((t) => t.done && t.doneAt === today).length;
+    g.reward = { since: today, base: base, banked: 0 };
+  }
+  g.reward.name = name.slice(0, 60);
+  g.reward.icon = String(v.icon || "").trim().slice(0, 4) || "🎁";
+  g.reward.cost = Math.max(1, Math.min(500, Math.round(num(v.cost)) || 10));
+  save(); closeModal(); render();
+}
+
+function rewardClaim() {
+  const g = gameData();
+  const r = g.reward;
+  const pr = rewardProgress();
+  if (!r || !pr || !pr.ready) return;
+  g.rewardsClaimed.unshift({ name: r.name, icon: r.icon, at: todayISO() });
+  g.rewardsClaimed = g.rewardsClaimed.slice(0, 30);
+  g.reward = null;
+  save(); render();
+  sysMsg("You have earned " + r.name + ".", "item");
+  celebrate({ stay: true, drop: true, rarity: "epic", kicker: "Reward unlocked!", big: r.name,
+              art: '<span class="drop-art" aria-hidden="true">' + esc(r.icon || "🎁") + "</span>",
+              sub: '<p class="drop-note">Go enjoy it. You earned it.</p>',
+              actions: '<div class="drop-actions"><button class="btn btn-primary" data-act="reward-edit">Pick the next one</button>' +
+                '<button class="btn">Later</button></div>' });
+}
+
+/* ---------- the world map ---------- */
+function worldMap() {
+  const level = gameStats().level;
+  const here = ((DB.game && DB.game.loot && DB.game.loot.equip) || {}).backdrop || "";
+  const current = mapOpen(here, level) ? here : "";
+  openModal("World map",
+    '<p class="world-lede">You\u2019re Lv.' + level + ". Towns open as your hero levels up, or sooner if one drops as loot.</p>" +
+    '<div class="world">' + WORLD.map((m) => {
+      const open = mapOpen(m.id, level);
+      return '<div class="town' + (open ? "" : " locked") + (m.id === current ? " here" : "") + '">' +
+        '<span class="bd-swatch town-pic" data-bd="' + m.id + '" aria-hidden="true"></span>' +
+        '<span class="town-name">' + esc(m.name) + '</span><span class="town-lv">Lv.' + m.level + "</span>" +
+        (m.id === current ? '<span class="town-here">You are here</span>'
+          : open ? '<button type="button" class="btn btn-sm btn-primary" data-act="travel" data-id="' + m.id + '">Travel</button>'
+          : '<span class="town-lock">🔒 Opens at Lv.' + m.level + "</span>") + "</div>";
+    }).join("") + "</div>",
+    '<button class="btn btn-primary" data-act="close-modal">Done</button>', { wide: true });
+}
+
+/* ============================================================
    PERSONAL: a playbook for an ADHD brain
    Short methods with a source each, and an honest word on how strong the evidence
    is. Every one can go straight into the quest log as a small first step.
@@ -2857,6 +3195,15 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "Bosses, rewards, the Gachapon, a world map and a stat key",
+    asked: "A key on the Personal tab for what each stat is for. The \u201cCan\u2019t decide?\u201d button, the boss card and the next reward were only samples: make them work and editable. Are there other maps besides Henesys?",
+    changed: [
+      "Personal tab: \u201cWhat goes where\u201d explains Hustle, Craft, Empire, Vitality and Mind with examples, the words Auto looks for, and the three priorities. The task form has a one-line reminder too.",
+      "Can\u2019t decide? Spin the Gachapon: it picks an open quest (leaning towards urgent and overdue ones), and \u201cDo this one\u201d makes it Up next.",
+      "Bosses are real: name a big goal, pick a MapleStory boss, and list its steps. Each step is a task; finishing one is a hit, and the last one brings the boss down with a guaranteed drop. Any task can join a boss from \u270e.",
+      "Next reward is yours to set: a treat, an icon, and how many quests it costs. When it fills up, claim it and pick the next.",
+      "Tap the town name at the top of Today for the world map: 14 towns, each opening at a hero level (or sooner as loot). Seven are new: Sleepywood, Nautilus Harbor, El Nath, Ariant, Aquarium, Leafre and Mu Lung.",
+    ] },
   { date: "2026-10-02", title: "Easier to read on a phone",
     asked: "On my phone it looked so condensed it was hard to read.",
     changed: [
@@ -2984,6 +3331,22 @@ function statRow(s, o, owned) {
     }).join("") + "</div></div></details>";
 }
 
+// The key: what goes in each stat, the words Auto listens for, and the priorities.
+function statGuideHTML() {
+  return '<section class="card stat-guide">' + STATS.map((s) => {
+    const words = STAT_WORDS[s.id].map((w) => w.replace(/\*$/, "")).slice(0, 10).join(", ");
+    return '<div class="guide-row" style="--stat:' + s.color + '">' +
+      '<span class="stat-icon" aria-hidden="true">' + s.icon + "</span>" +
+      '<div class="guide-text"><p class="guide-head"><span class="stat-name">' + s.name + "</span> " +
+        esc(s.what) + "</p>" +
+      '<p class="guide-eg">' + esc(STAT_GUIDE[s.id].examples) + "</p>" +
+      '<p class="guide-auto">Auto spots: ' + esc(words) + "\u2026</p></div></div>";
+  }).join("") +
+    '<div class="guide-prio"><p class="guide-head">Priority</p><ul>' + PRIORITIES.map((p) =>
+      "<li><strong>" + (p.icon ? p.icon + " " : "") + p.name + "</strong> \u00b7 " + p.xp + " EXP \u00b7 " + esc(p.hint) + "</li>").join("") +
+    "</ul></div></section>";
+}
+
 function howXPHTML() {
   return '<details class="card how-xp"><summary>How EXP works</summary><div class="how-body">' +
     "<p><strong>Priority sets the EXP,</strong> not how big a task is: " +
@@ -3021,21 +3384,25 @@ function lootHTML() {
   const group = (kind, label, none) => {
     const items = kind === "title"
       ? Object.keys(owned).map(lootItem).filter((x) => x && x.kind === "title")
+      : kind === "backdrop" ? LOOT.filter((x) => x.kind === kind && mapOpen(x.id))
       : LOOT.filter((x) => x.kind === kind && owned[x.id]);
-    const hidden = LOOT.filter((x) => x.kind === kind && !owned[x.id]).length;
-    const current = eq[kind] && owned[eq[kind]] ? eq[kind] : "";
+    const hidden = kind === "backdrop" ? LOOT.filter((x) => x.kind === kind && !mapOpen(x.id)).length
+      : LOOT.filter((x) => x.kind === kind && !owned[x.id]).length;
+    const current = eq[kind] && (kind === "backdrop" ? mapOpen(eq[kind]) : owned[eq[kind]]) ? eq[kind] : "";
     return '<div class="loot-group"><h3 id="loot-' + kind + '">' + label + "</h3>" +
       '<div class="opts" role="group" aria-labelledby="loot-' + kind + '">' +
       lootOpt(kind, "", lootPreview(kind, "") + none, !current) +
       items.map((it) => lootOpt(kind, it.id, lootPreview(kind, it.id) + esc(it.name), current === it.id)).join("") +
       "</div>" +
-      '<p class="loot-hidden">' + (hidden ? hidden + " more to find" : "All found!") + "</p></div>";
+      '<p class="loot-hidden">' + (hidden ? hidden + (kind === "backdrop" ? " more towns to reach" : " more to find") : "All found!") + "</p></div>";
   };
   const recent = (l.recent || []).slice(0, 5).map((r) => lootItem(r.id)).filter(Boolean);
   return '<h2 class="section-head">Loot <span class="count">' + found + " / " + LOOT.length + "</span></h2>" +
     '<p class="page-lede">Bonus drops from finished quests. Tap one you\u2019ve found to equip it.</p>' +
     '<section class="card loot-card">' +
     group("title", "Medal", "No medal") + group("bar", "Gauge skin", "Classic") + group("backdrop", "Map", "Henesys") +
+    '<p class="loot-world"><button type="button" class="btn btn-sm" data-act="world-map">🗺 World map</button> ' +
+    "Towns open as your hero levels up, or sooner if one drops.</p>" +
     (recent.length ? '<p class="loot-recent"><strong>Recent:</strong> ' +
       recent.map((it) => esc(it.name)).join(" \u00b7 ") + "</p>" : "") +
     "</section>";
@@ -3057,6 +3424,10 @@ VIEWS.personal = function () {
     '<p>Lv.' + g.level + " · " + g.totalXP.toLocaleString() + " EXP · " +
       (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
     '<button class="btn btn-sm" data-act="hero-edit">👕 Closet</button></div></section>';
+
+  html += '<h2 class="section-head">What goes where</h2>' +
+    '<p class="page-lede">Every task trains one stat. Pick it when you add a task, or leave it on Auto and the words decide.</p>' +
+    statGuideHTML();
 
   html += '<h2 class="section-head">Stats</h2>' +
     '<p class="page-lede">Five stats, each with its own level and streak. Tap one for the detail and its badges.</p>' +
@@ -3134,7 +3505,6 @@ function statsPanel(sheet, g) {
 VIEWS.today = function () {
   const g = gameStats();
   const sheet = statSheet();
-  const s = GAME_SAMPLE;
   const todos = DB.todos || [];
   const today = todayISO();
   let html = "";
@@ -3213,29 +3583,8 @@ VIEWS.today = function () {
 
   html += '</div><aside class="play-side">';
 
-  /* ---- sidebar: roll, boss, reward (sample content until steps 3 and 4) ---- */
-  html += '<section class="card side-card roll-card on-yellow">' +
-    "<h2>Can’t decide?</h2><p>Let the dice pick your next quest.</p>" +
-    '<button class="btn btn-big" disabled>🎲 Roll a quest</button>' +
-    '<p class="soon">Rolling arrives in step 3.</p></section>';
-
-  const hp = Math.round((1 - s.boss.done / s.boss.steps) * 100);
-  html += '<section class="card side-card boss-card">' +
-    '<div class="side-top"><span class="tag tag-boss">Boss</span><span class="tag tag-sample">Sample</span></div>' +
-    "<h2>" + esc(s.boss.name) + "</h2>" +
-    '<div class="meter meter-boss" role="progressbar" aria-label="Boss health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + hp + '">' +
-    '<div class="meter-fill" style="width:' + hp + '%"></div></div>' +
-    '<p class="side-line"><strong>' + s.boss.done + " of " + s.boss.steps + "</strong> steps done · " + hp + "% health left</p>" +
-    '<p class="side-line">Next hit: ' + esc(s.boss.next) + "</p></section>";
-
-  const rp = Math.min(100, Math.round(s.reward.have / s.reward.cost * 100));
-  html += '<section class="card side-card reward-card on-blue">' +
-    '<div class="side-top"><span class="tag tag-reward">Next reward</span><span class="tag tag-sample">Sample</span></div>' +
-    "<h2>🍣 " + esc(s.reward.name) + "</h2>" +
-    '<div class="meter meter-reward" role="progressbar" aria-label="Quests toward this reward" aria-valuemin="0" aria-valuemax="' +
-      s.reward.cost + '" aria-valuenow="' + s.reward.have + '"><div class="meter-fill" style="width:' + rp + '%"></div></div>' +
-    '<p class="side-line"><strong>' + s.reward.have + " / " + s.reward.cost + "</strong> quests · " +
-      (s.reward.cost - s.reward.have) + " to go</p></section>";
+  /* ---- sidebar: the Gachapon, the boss fight, the next reward ---- */
+  html += gachaponCard() + bossCard() + rewardCard();
 
   html += "</aside></div>";
   return html;
@@ -6811,6 +7160,20 @@ document.addEventListener("click", (e) => {
       break;
     case "toggle-todo": toggleTodo(id); break;
     case "loot-equip": equipLoot(el.dataset.kind, id); break;
+    case "roll": rollQuest(); break;
+    case "roll-take": state.rolled = null; assignTop(id, 0); break;
+    case "boss-new": bossEditor(null); break;
+    case "boss-edit": bossEditor(id); break;
+    case "boss-save": bossSave(id); break;
+    case "boss-delete": bossDelete(id); break;
+    case "boss-prev": state.bossIdx = Math.max(0, num(state.bossIdx) - 1); render(); break;
+    case "boss-next": state.bossIdx = Math.min(activeBosses().length - 1, num(state.bossIdx) + 1); render(); break;
+    case "reward-edit": rewardEditor(); break;
+    case "reward-save": rewardSave(); break;
+    case "reward-claim": rewardClaim(); break;
+    case "reward-clear": gameData().reward = null; save(); closeModal(); render(); break;
+    case "world-map": worldMap(); break;
+    case "travel": equipLoot("backdrop", id); closeModal(); break;
     case "hero-edit": heroEditor(); break;
     case "closet-tab": closetSetTab(el.dataset.tab); break;
     case "closet-pick": closetPick(num(id)); break;
