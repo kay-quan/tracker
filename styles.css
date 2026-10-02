@@ -2679,11 +2679,6 @@ td input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--prima
    TODAY: the quest dashboard
    ============================================================ */
 
-.xpbar { padding: 18px 24px 22px; margin-bottom: 30px; }
-.xpbar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.xpbar-title { font-family: var(--game); font-weight: 700; font-size: 26px; }
-.xpbar-num { font-family: var(--game); font-weight: 600; font-size: 22px; color: var(--ink-2); }
-
 .meter {
   height: 30px;
   background: var(--surface-2);
@@ -2821,9 +2816,6 @@ td input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--prima
   .hud { gap: 7px; width: 100%; }
   .hud-pill { font-size: 15px; padding: 3px 10px; min-height: 44px; gap: 4px; box-shadow: var(--shadow-xs); }
   .quest, .quest.slot.filled { align-items: flex-start; }
-  .xpbar { padding: 16px 18px 18px; margin-bottom: 26px; }
-  .xpbar-title { font-size: 23px; }
-  .xpbar-num { font-size: 19px; }
   .quest, .quest.slot.filled { flex-wrap: wrap; padding: 16px; gap: 14px; }
   .quest .taskbody { flex-basis: calc(100% - 66px); }
   .quest-side { flex-direction: row; align-items: center; justify-content: space-between; width: 100%; padding-left: 62px; }
@@ -3117,3 +3109,292 @@ td input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--prima
   min-height: 44px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
 }
 .fine-print { margin-bottom: 8px; }
+
+/* ============================================================
+   STATS: five stats, each with its own level, bar and streak
+   --stat is set per stat in the markup. Text on it is always the dark ink,
+   which reads on all five colours.
+   ============================================================ */
+
+.stats-panel { padding: 18px 22px 22px; margin-bottom: 30px; }
+.stats-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.stats-head h2 { font-size: 26px; margin: 0; }
+.stats-hero { font-family: var(--game); font-weight: 600; font-size: 19px; color: var(--ink-2); text-decoration: none; }
+.stats-hero:hover { color: var(--ink); text-decoration: underline; }
+.stat-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+
+.stat-tile {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-areas: "icon label" "bar bar" "foot foot";
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+  padding: 12px 14px 12px;
+  border: var(--line) solid var(--outline);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--stat) 15%, var(--surface));
+  box-shadow: var(--shadow-xs);
+}
+.stat-icon {
+  grid-area: icon;
+  width: 38px; height: 38px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 1;
+  border: var(--line) solid var(--outline);
+  border-radius: 12px;
+  background: var(--stat);
+}
+.stat-label { grid-area: label; display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.stat-name { font-family: var(--game); font-weight: 700; font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-lv { font-family: var(--game); font-weight: 600; font-size: 15px; color: var(--ink-2); }
+.meter-stat, .meter-stat .meter-fill { display: block; }
+.meter-stat { grid-area: bar; height: 22px; margin: 10px 0 9px; }
+.meter-stat .meter-fill { background-color: var(--stat); }
+.stat-foot { grid-area: foot; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; color: var(--ink-2); }
+.stat-mult { font-family: var(--game); font-weight: 700; font-size: 16px; color: var(--ink); }
+.stat-xp { margin-left: auto; font-family: var(--game); font-weight: 600; }
+
+.streak {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-family: var(--game); font-weight: 700; font-size: 15px;
+  padding: 1px 9px;
+  border: 2px solid var(--outline);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.streak.lit { background: var(--yellow); color: #14142B; }
+.streak.at-risk { background: var(--surface); color: var(--ink); border-style: dashed; }
+.streak.cold { border-color: transparent; padding-left: 0; color: var(--ink-3); font-weight: 600; }
+
+.stat-tile.bump { animation: tile-bump 0.45s ease-out; }
+@keyframes tile-bump { 40% { transform: translateY(-3px); box-shadow: 5px 6px 0 var(--shadow-c); } }
+.streak.bump { animation: hud-bump 0.5s 0.15s ease-out; }
+
+/* Phone: one line per stat, so all five fit above the battle. */
+@media (max-width: 760px) {
+  .stats-panel { padding: 14px 14px 16px; margin-bottom: 24px; }
+  .stats-head h2 { font-size: 23px; }
+  .stats-hero { font-size: 16px; }
+  .stat-tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .stat-tile {
+    grid-template-columns: 32px 76px minmax(0, 1fr) 72px;
+    grid-template-areas: "icon label bar foot";
+    padding: 6px 10px;
+    border-width: 2px;
+    border-radius: 14px;
+    box-shadow: none;
+  }
+  .stat-icon { width: 32px; height: 32px; font-size: 17px; border-width: 2px; border-radius: 10px; }
+  .stat-name { font-size: 17px; }
+  .stat-lv { font-size: 13px; }
+  .meter-stat { height: 16px; margin: 0; border-width: 2px; }
+  .stat-mult, .stat-xp { display: none; }
+  .stat-foot { justify-content: flex-end; }
+  .streak { font-size: 14px; padding: 0 7px; }
+  .streak.cold { font-size: 13px; }
+}
+
+/* ---------- the stat on a task, and what it pays ---------- */
+
+.stat-chip { background: color-mix(in srgb, var(--stat) 22%, var(--surface)); color: var(--ink); }
+.prio-chip.prio-urgent { background: var(--boss); color: #14142B; }
+.prio-chip.prio-booked { background: var(--surface-2); color: var(--ink-2); }
+.xp-pill.prio-urgent:not(.earned) { background: var(--boss); }
+.xp-pill.prio-booked:not(.earned) { background: var(--surface-2); color: var(--ink); box-shadow: none; }
+.xp-float { background: var(--stat, var(--yellow)); }
+
+/* The add row: name, stat, priority, Add. Wraps to two lines on a phone. */
+.todo-add { flex-wrap: wrap; }
+.todo-add input { flex: 1 1 160px; }
+.todo-add select { flex: 0 1 auto; font-size: 18px; min-height: 44px; padding-top: 4px; padding-bottom: 4px; border-radius: 14px; }
+@media (max-width: 640px) {
+  .todo-add input { flex: 1 1 calc(100% - 100px); order: 1; }
+  .todo-add .btn { order: 2; }
+  .todo-add select { order: 3; flex: 1 1 40%; min-width: 0; font-size: 16px;
+                     padding: 4px 28px 4px 10px; background-position: right 10px center; }
+}
+
+/* Option chips that are real radio buttons underneath. */
+.opt { position: relative; }
+.opt input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.opt:has(input:checked) { background: var(--primary); color: #fff; box-shadow: 3px 3px 0 var(--shadow-c); }
+.opt:has(input:checked)::before { content: "\2713"; }
+.opt:has(input:focus-visible) { outline: 3px solid var(--primary); outline-offset: 3px; }
+.field-note { margin: 10px 0 0; font-size: 16px; color: var(--ink-2); }
+
+/* ---------- Personal: the stat sheet ---------- */
+
+.how-xp { margin-bottom: 14px; }
+.how-xp > summary, .stat-row > summary { cursor: pointer; list-style: none; }
+.how-xp > summary::-webkit-details-marker, .stat-row > summary::-webkit-details-marker { display: none; }
+.how-xp > summary {
+  font-family: var(--game); font-weight: 600; font-size: 20px;
+  min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 8px 20px;
+}
+.how-xp > summary::before, .stat-row > summary::after { content: "\25B8"; font-size: 16px; transition: transform 0.15s; }
+.how-xp[open] > summary::before, .stat-row[open] > summary::after { transform: rotate(90deg); }
+.how-body { padding: 0 22px 8px; font-size: 18px; }
+.how-body p { margin: 0 0 12px; }
+
+.stat-rows { display: grid; gap: 12px; margin-bottom: 8px; }
+.stat-row { padding: 0; overflow: hidden; background: color-mix(in srgb, var(--stat) 12%, var(--surface)); }
+.stat-row > summary.stat-tile {
+  grid-template-columns: 38px 104px minmax(0, 1fr) 96px 18px;
+  grid-template-areas: "icon label bar foot caret";
+  border: 0; border-radius: 0; box-shadow: none; background: transparent;
+  padding: 12px 18px;
+}
+.stat-row > summary::after { grid-area: caret; justify-self: end; color: var(--ink-2); }
+.stat-row .meter-stat { margin: 0; }
+.stat-row .stat-foot { justify-content: flex-end; }
+.stat-detail { padding: 4px 20px 18px; border-top: 2px solid var(--border); background: var(--surface); }
+.stat-what { margin: 12px 0 10px; font-size: 18px; color: var(--ink-2); }
+.stat-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 10px 22px; margin: 0 0 16px; }
+.stat-facts dt { font-family: var(--game); font-weight: 600; font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); }
+.stat-facts dd { margin: 0; font-size: 18px; }
+@media (max-width: 760px) {
+  .stat-row > summary.stat-tile { grid-template-columns: 32px 76px minmax(0, 1fr) 66px 14px; padding: 10px 12px; }
+  .stat-detail { padding: 4px 14px 16px; }
+  .stat-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+  .stat-facts dd { font-size: 16px; }
+}
+
+/* Streak badges: a medal in the stat's colour, ringed by rarity. */
+.medals { display: flex; flex-wrap: wrap; gap: 10px; }
+.medal {
+  position: relative;
+  width: 58px; height: 58px; flex: none;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  border: var(--line) solid var(--outline);
+  border-radius: 50%;
+  background: var(--stat);
+  box-shadow: 0 0 0 4px #E3B26B, var(--shadow-xs);
+  color: #14142B; line-height: 1;
+}
+.medal-rare { box-shadow: 0 0 0 4px #C9D3E6, var(--shadow-xs); }
+.medal-epic { box-shadow: 0 0 0 4px var(--yellow), var(--shadow-xs); }
+.medal-icon { font-size: 18px; }
+.medal b { font-family: var(--game); font-weight: 700; font-size: 17px; }
+.medal-n {
+  position: absolute; right: -10px; top: -8px;
+  font-family: var(--game); font-weight: 700; font-size: 13px;
+  padding: 0 6px; border: 2px solid var(--outline); border-radius: 999px; background: var(--surface); color: var(--ink);
+}
+.medal.locked { background: transparent; border-style: dashed; border-color: var(--ink-3); box-shadow: none; color: var(--ink-3); }
+.medal.big { width: 110px; height: 110px; margin: 0 auto 12px; border-width: 4px; box-shadow: 0 0 0 6px #E3B26B, 5px 5px 0 #14142B; }
+.medal.big.medal-rare { box-shadow: 0 0 0 6px #C9D3E6, 5px 5px 0 #14142B; }
+.medal.big.medal-epic { box-shadow: 0 0 0 6px #FFFFFF, 5px 5px 0 #14142B; }
+.medal.big .medal-icon { font-size: 34px; }
+.medal.big b { font-size: 30px; }
+
+/* ---------- loot ---------- */
+
+.title-tag {
+  display: inline-block;
+  font-family: var(--game); font-weight: 600; font-size: 0.8em;
+  padding: 0 10px;
+  border: 2px solid var(--outline); border-radius: 999px;
+  background: var(--yellow-hi); color: #14142B;
+  white-space: nowrap; vertical-align: 0.1em;
+}
+.hero-card .hero-title { margin: 0 0 10px; font-size: 20px; }
+.tag-common { background: #FFFFFF; }
+.tag-rare { background: #9FC1FF; }
+.tag-epic { background: #D3B8FF; }
+
+.loot-card { padding: 20px 22px; }
+.loot-group + .loot-group { margin-top: 18px; padding-top: 16px; border-top: 2px solid var(--border); }
+.loot-group h3 { font-size: 21px; margin: 0 0 10px; }
+.loot-hidden { margin: 8px 0 0; font-size: 16px; color: var(--ink-2); }
+.loot-recent { margin: 18px 0 0; padding-top: 14px; border-top: 2px solid var(--border); font-size: 17px; color: var(--ink-2); }
+.loot-recent strong { color: var(--ink); }
+.opt .skin-preview.mini { width: 54px; height: 16px; margin: 0; border-width: 2px; }
+.opt .skin-preview.mini .meter-fill { width: 70%; }
+.bd-swatch {
+  display: inline-block; flex: none;
+  border: 2px solid var(--outline); border-radius: 8px;
+  background-color: var(--bg);
+}
+.bd-swatch.mini { width: 26px; height: 26px; }
+
+/* The drop itself: the level-up card, held until tapped. */
+.levelup.stay { animation: lu-in 0.2s ease-out both; }
+@keyframes lu-in { from { opacity: 0; } to { opacity: 1; } }
+.levelup-card.drop { max-width: min(92vw, 460px); padding: 26px 30px 24px; }
+.levelup-card.drop .levelup-level { font-size: 34px; line-height: 1.15; margin: 4px 0 10px; }
+.drop-art {
+  display: flex; align-items: center; justify-content: center;
+  width: 96px; height: 96px; margin: 0 auto 12px;
+  font-size: 48px; line-height: 1;
+  border: 4px solid #14142B; border-radius: 24px;
+  background: #FFFFFF; box-shadow: 4px 4px 0 #14142B;
+}
+.stat-art { background: var(--stat); border-radius: 50%; }
+.levelup-card.drop .bd-swatch.drop-art { width: 120px; height: 90px; border-radius: 18px; }
+.drop-art-bar { width: 220px; height: 30px; margin: 10px auto 18px; }
+.drop-tags { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 10px; }
+.drop-note { margin: 0 0 10px; font-size: 17px; color: #3C416B; }
+.drop-actions { display: flex; gap: 12px; justify-content: center; margin-top: 16px; }
+.drop-actions .btn { min-width: 110px; }
+
+/* Bar skins: a pattern over each bar's own colour, so a stat stays its colour.
+   The previews in the loot list carry their own skin and ignore the one worn. */
+[data-bar="bar-stripes"] .meter-xp:not(.skin-preview) .meter-fill, .skin-preview[data-skin="bar-stripes"] .meter-fill {
+  background-image: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.45) 0 7px, transparent 7px 14px);
+}
+[data-bar="bar-dots"] .meter-xp:not(.skin-preview) .meter-fill, .skin-preview[data-skin="bar-dots"] .meter-fill {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.65) 2.5px, transparent 3px);
+  background-size: 11px 11px;
+}
+[data-bar="bar-checker"] .meter-xp:not(.skin-preview) .meter-fill, .skin-preview[data-skin="bar-checker"] .meter-fill {
+  background-image: conic-gradient(rgba(20, 20, 43, 0.2) 25%, transparent 0 50%, rgba(20, 20, 43, 0.2) 0 75%, transparent 0);
+  background-size: 12px 12px;
+}
+[data-bar="bar-gloss"] .meter-xp:not(.skin-preview) .meter-fill, .skin-preview[data-skin="bar-gloss"] .meter-fill {
+  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.7) 0 30%, transparent 30% 68%, rgba(20, 20, 43, 0.16) 68%);
+}
+[data-bar="bar-rainbow"] .meter-xp:not(.skin-preview) .meter-fill, .skin-preview[data-skin="bar-rainbow"] .meter-fill {
+  background-image: linear-gradient(90deg, #FF5A4E, #FFC933, #2BB673, #4A86FF, #A274FF);
+}
+
+/* Backdrops: quiet patterns behind the cards, drawn in the hairline colour so
+   they work in both themes and never fight the text. */
+body[data-backdrop="bg-dots"], .bd-swatch[data-bd="bg-dots"] {
+  background-image: radial-gradient(var(--border) 2.5px, transparent 3px);
+  background-size: 26px 26px;
+}
+.bd-swatch[data-bd="bg-dots"] { background-size: 9px 9px; }
+body[data-backdrop="bg-grid"], .bd-swatch[data-bd="bg-grid"] {
+  background-image: linear-gradient(var(--border) 2px, transparent 2px), linear-gradient(90deg, var(--border) 2px, transparent 2px);
+  background-size: 34px 34px;
+}
+.bd-swatch[data-bd="bg-grid"] { background-size: 8px 8px; }
+body[data-backdrop="bg-diagonal"], .bd-swatch[data-bd="bg-diagonal"] {
+  background-image: repeating-linear-gradient(45deg, var(--border) 0 4px, transparent 4px 24px);
+}
+.bd-swatch[data-bd="bg-diagonal"] { background-image: repeating-linear-gradient(45deg, var(--border) 0 2px, transparent 2px 7px); }
+body[data-backdrop="bg-checker"], .bd-swatch[data-bd="bg-checker"] {
+  background-image: conic-gradient(color-mix(in srgb, var(--border) 60%, transparent) 25%, transparent 0 50%,
+                                   color-mix(in srgb, var(--border) 60%, transparent) 0 75%, transparent 0);
+  background-size: 60px 60px;
+}
+.bd-swatch[data-bd="bg-checker"] { background-size: 12px 12px; }
+body[data-backdrop="bg-confetti"], .bd-swatch[data-bd="bg-confetti"] {
+  background-image:
+    radial-gradient(circle at 20% 30%, #FF8A3D 3px, transparent 4px),
+    radial-gradient(circle at 70% 15%, #4A86FF 3px, transparent 4px),
+    radial-gradient(circle at 45% 70%, #A274FF 3px, transparent 4px),
+    radial-gradient(circle at 85% 60%, #2BB673 3px, transparent 4px),
+    radial-gradient(circle at 10% 85%, #FF6FB0 3px, transparent 4px),
+    radial-gradient(circle at 60% 45%, #FFC933 3px, transparent 4px);
+  background-size: 140px 140px;
+}
+.bd-swatch[data-bd="bg-confetti"] { background-size: 26px 26px; }
+body[data-backdrop="bg-sunburst"], .bd-swatch[data-bd="bg-sunburst"] {
+  background-image: repeating-conic-gradient(from 0deg at 50% 0, color-mix(in srgb, var(--yellow) 26%, transparent) 0 5deg, transparent 5deg 10deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-tile.bump, .streak.bump { animation: none; }
+}

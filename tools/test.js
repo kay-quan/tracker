@@ -102,6 +102,9 @@ let app = read("app.js").replace(
   "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
   "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, slimeOfDay,\n" +
   "  slimeFor, SLIMES, VIEWS, CHANGELOG, assignTop,\n" +
+  "  STATS, PRIORITIES, statSheet, streakMult, statLevel, guessStat, statOf, prioOf, earnedXP,\n" +
+  "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
+  "  heroTitle, addDays,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -999,14 +1002,14 @@ t("the slime's health is today's quest XP, and finishing them all wins", () => {
   const db = T.withDefaults(T.defaultData());
   const today = T.isoOf(new Date());
   db.todos = [
-    { id: "a", text: "a", done: false, top: true, topRank: 0, xp: 30 },
-    { id: "b", text: "b", done: true, doneAt: today },
+    { id: "a", text: "a", done: false, top: true, topRank: 0, prio: "urgent", stat: "craft" },
+    { id: "b", text: "b", done: true, doneAt: today, stat: "craft" },
     { id: "c", text: "c", done: true, doneAt: "2020-01-01" },     // an old win doesn't count
   ];
   T.setDB(db);
   let b = T.battleState(T.todaysQuests());
-  eq(b.maxHP, 50, "30 open + 20 done today");
-  eq(b.hp, 30, "only the open quest is left");
+  eq(b.maxHP, 70, "50 for the urgent open quest + 20 done today");
+  eq(b.hp, 50, "only the open quest is left");
   eq(b.won, false);
   db.todos[0].done = true; db.todos[0].doneAt = today; db.todos[0].top = false;
   b = T.battleState(T.todaysQuests());
@@ -1103,6 +1106,177 @@ t("only with all three slots full does the occupant go back to the log", () => {
   T.assignTop("c", 1);
   eq(slots(), "a@0 c@1 d@2");
   eq(db.todos.find((x) => x.id === "b").top, false, "b returns to the log");
+});
+
+/* ---------- the five stats ---------- */
+
+const dayAgo = (n) => T.addDays(T.isoOf(new Date()), -n);
+const never = () => 0.99;     // an rng that never drops bonus loot
+
+t("XP comes from priority: booked 10, regular 25, urgent 50", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [{ id: "a", text: "a", stat: "mind", prio: "booked" },
+              { id: "b", text: "b", stat: "mind" },
+              { id: "c", text: "c", stat: "mind", prio: "urgent", xp: 999 }];   // an old XP number is ignored
+  T.setDB(db);
+  const sh = T.statSheet();
+  eq(db.todos.map((x) => T.previewXP(x, sh)).join(), "10,25,50");
+});
+
+t("the multiplier climbs with no cap, but each step takes longer", () => {
+  eq(T.streakMult(1), 1); eq(T.streakMult(2), 1.25); eq(T.streakMult(4), 1.5); eq(T.streakMult(16), 2);
+  for (let d = 1; d < 400; d++) {
+    if (!(T.streakMult(d + 1) > T.streakMult(d))) throw new Error("stopped climbing at day " + d);
+    if (d > 1 && T.streakMult(d + 1) - T.streakMult(d) > T.streakMult(d) - T.streakMult(d - 1) + 1e-12)
+      throw new Error("sped up at day " + d);
+  }
+  if (!(T.streakMult(5000) > T.streakMult(1000))) throw new Error("capped");
+});
+
+t("a stat levels up at 100 XP, then 50 more each level", () => {
+  eq(T.statLevel(99).level, 1);
+  const l2 = T.statLevel(100);
+  eq(l2.level, 2); eq(l2.into, 0); eq(l2.need, 150);
+  eq(T.statLevel(250).level, 3, "100 + 150");
+});
+
+t("each stat keeps its own streak; missing a day resets only that one", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [doneOn("c1", "2026-09-28"), doneOn("c2", "2026-09-29"), doneOn("c3", "2026-09-30"),
+              doneOn("h1", "2026-09-29")];
+  db.todos.forEach((x) => { x.stat = x.id[0] === "c" ? "craft" : "hustle"; });
+  T.setDB(db);
+  let sh = T.statSheet("2026-09-30T12:00:00");
+  eq(sh.craft.streak, 3); eq(sh.hustle.streak, 1, "hustle's run is alive until today ends");
+  sh = T.statSheet("2026-10-01T09:00:00");
+  eq(sh.craft.streak, 3, "craft untouched by hustle's miss");
+  eq(sh.hustle.streak, 0, "hustle missed 9/30 and reset");
+  eq(sh.mind.streak, 0, "a stat never used has no streak");
+});
+
+t("ticking off stamps the XP at that stat's multiplier, and it never shrinks later", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [doneOn("y2", dayAgo(2)), doneOn("y1", dayAgo(1)), doneOn("v", dayAgo(1)),
+              { id: "n", text: "Reply to the client", prio: "urgent", stat: "craft", done: true, doneAt: dayAgo(0) }];
+  db.todos[0].stat = db.todos[1].stat = "craft";
+  db.todos[2].stat = "vitality";
+  T.setDB(db);
+  T.awardTask(db.todos[3], never);
+  const want = Math.round(50 * T.streakMult(3));
+  eq(db.todos[3].earned.xp, want, "urgent 50 on a 3-day craft streak");
+  eq(T.statSheet().vitality.xp, 20, "vitality's legacy task is untouched");
+  db.todos = db.todos.filter((x) => x.id === "n");        // the streak behind it disappears
+  eq(T.earnedXP(db.todos[0]), want, "stamped, so it doesn't shrink");
+});
+
+t("a streak milestone always drops its badge, once per run", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [doneOn("a", dayAgo(2)), doneOn("b", dayAgo(1)),
+              { id: "n", text: "n", stat: "craft", done: true, doneAt: dayAgo(0) }];
+  db.todos[0].stat = db.todos[1].stat = "craft";
+  T.setDB(db);
+  let drops = T.awardTask(db.todos[2], never);
+  eq(drops.map((d) => d.item.id).join(), "badge-craft-3", "day 3 pays out");
+  eq(db.game.loot.owned["badge-craft-3"].n, 1);
+  // Un-tick and re-tick: same run, so no second badge, and no second bonus roll.
+  db.todos[2].done = false; delete db.todos[2].earned;
+  db.todos[2].done = true; db.todos[2].doneAt = dayAgo(0);
+  drops = T.awardTask(db.todos[2], () => 0);
+  eq(drops.length, 0, "nothing new: badge already paid for this run, and the task already rolled");
+});
+
+t("a 30-day streak pays every badge up to it, plus the stat's title", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [];
+  for (let i = 29; i >= 1; i--) db.todos.push(Object.assign(doneOn("d" + i, dayAgo(i)), { stat: "hustle" }));
+  const n = { id: "n", text: "n", stat: "hustle", done: true, doneAt: dayAgo(0) };
+  db.todos.push(n);
+  T.setDB(db);
+  const ids = T.awardTask(n, never).map((d) => d.item.id);
+  eq(ids.join(), "badge-hustle-3,badge-hustle-7,badge-hustle-14,badge-hustle-30,st-hustle-30");
+  eq(T.lootItem("st-hustle-30").kind, "title");
+});
+
+t("bonus loot drops about 8% of the time, only unfound items, then XP chests", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.setDB(db);
+  let seed = 12345;
+  const rng = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let hits = 0;
+  for (let i = 0; i < 20000; i++) if (T.rollLoot(rng)) hits++;
+  const rate = hits / 20000;
+  if (rate < 0.06 || rate > 0.10) throw new Error("drop rate " + rate);
+  if (T.LOOT_CHANCE < 0.05 || T.LOOT_CHANCE > 0.10) throw new Error("chance outside 5-10%");
+  eq(T.rollLoot(() => 0.5), null, "a miss");
+  db.game.loot.owned = {};
+  T.LOOT.slice(1).forEach((x) => { db.game.loot.owned[x.id] = { n: 1 }; });
+  eq(T.rollLoot(() => 0.01).id, T.LOOT[0].id, "only the one not yet found can drop");
+  db.game.loot.owned[T.LOOT[0].id] = { n: 1 };
+  eq(T.rollLoot(() => 0.01).kind, "chest", "everything found: XP instead");
+});
+
+t("a chest pays its XP into the task's stat", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.LOOT.forEach((x) => { db.game.loot.owned[x.id] = { n: 1 }; });
+  db.todos = [{ id: "n", text: "n", stat: "empire", done: true, doneAt: dayAgo(0) }];
+  T.setDB(db);
+  const drops = T.awardTask(db.todos[0], () => 0.01);
+  eq(drops[0].item.kind, "chest");
+  eq(T.statSheet().empire.xp, 50 + 25, "the chest plus the task itself");
+  eq(T.statSheet().craft.xp, 0, "and nowhere else");
+});
+
+t("deleting a finished task keeps its XP and streak day in its stat", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.todos = [Object.assign(doneOn("a", "2026-09-01", 40), { stat: "mind" })];
+  T.setDB(db);
+  T.bankXP(db.todos);
+  db.todos = [];
+  const sh = T.statSheet();
+  eq(sh.mind.xp, 40); eq(sh.mind.days.has("2026-09-01"), true);
+  eq(sh.craft.xp, 0, "nothing leaks into other stats");
+});
+
+t("older tasks get a stat from their words, then their category", () => {
+  eq(T.guessStat({ text: "List the jacket on eBay" }), "hustle");
+  eq(T.guessStat({ text: "Edit the wedding gallery" }), "craft");
+  eq(T.guessStat({ text: "Update the Lightroom presets on Gumroad" }), "empire", "two empire words beat one craft word");
+  eq(T.guessStat({ text: "Gym before lunch" }), "vitality");
+  eq(T.guessStat({ text: "Get ready for taxes" }), "mind", "'ready' doesn't count as 'read'");
+  eq(T.guessStat({ text: "Call back", category: "Admin" }), "mind", "category when no words match");
+  eq(T.guessStat({ text: "Call back" }), "craft", "and photo work when nothing does");
+  eq(T.statOf({ stat: "empire", text: "gym" }), "empire", "a picked stat always wins");
+  eq(T.prioOf({ category: "Shoot" }), "booked");
+  eq(T.prioOf({ category: "Client" }), "urgent");
+  eq(T.prioOf({}), "regular");
+  eq(T.prioOf({ prio: "booked", category: "Urgent" }), "booked", "a picked priority always wins");
+});
+
+t("old saves gain the stats and loot without losing anything", () => {
+  const db = T.withDefaults({ settings: {}, game: { bankedXP: 40, bankedDays: ["2026-09-01"], hero: { weapon: "staff" } } });
+  eq(db.game.bankedXP, 40); eq(db.game.hero.weapon, "staff");
+  eq(typeof db.game.statBank, "object");
+  eq(Array.isArray(db.game.loot.runs), true);
+  eq(typeof db.game.loot.owned, "object");
+});
+
+t("Today shows all five stats; Personal shows only loot you've found", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
+  db.todos = [{ id: "a", text: "Ship the jacket", stat: "hustle" }];
+  db.game.loot.owned["t-inbox"] = { n: 1 };
+  db.game.loot.equip.title = "t-inbox";
+  T.setDB(db);
+  T.setState({ view: "today", showDone: false });
+  const today = T.VIEWS.today();
+  T.STATS.forEach((s) => { if (today.indexOf('data-stat="' + s.id + '"') < 0) throw new Error("no tile for " + s.name); });
+  T.setState({ view: "personal" });
+  const p = T.VIEWS.personal();
+  if (p.indexOf("Inbox Slayer") < 0) throw new Error("found title missing");
+  if (p.indexOf("Main Character") >= 0) throw new Error("an unfound title is showing");
+  eq(T.heroTitle(), "Inbox Slayer");
+  db.game.loot.equip.title = "t-maincharacter";
+  eq(T.heroTitle(), "", "a title you don't own can't be worn");
 });
 
 /* ---------- report ---------- */

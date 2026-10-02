@@ -134,9 +134,11 @@ function defaultData() {
     },
     clients: [], gigs: [], invoices: [], income: [], expenses: [],
     outreach: [], todos: [], localEvents: [], localEventsFetchedAt: null,
-    /* XP and streak days kept from finished tasks that were later deleted, so the
-       bar never goes backwards when the list is tidied. */
-    game: { bankedXP: 0, bankedDays: [] },
+    /* The game: XP and streak days kept from finished tasks that were later
+       deleted (overall, and per stat in statBank) so no bar goes backwards when
+       the list is tidied; the loot collection; and the hero's look. */
+    game: { bankedXP: 0, bankedDays: [], statBank: {},
+            loot: { owned: {}, equip: {}, runs: [], recent: [] } },
     // Personal things on the calendar. Deliberately NOT gigs: they have no client,
     // no fee and no invoice, and they must never reach the money side.
     personal: [],
@@ -149,8 +151,7 @@ function withDefaults(data) {
   const base = defaultData();
   const out = Object.assign({}, base, data || {});
   out.settings = Object.assign({}, base.settings, (data && data.settings) || {});
-  out.game = Object.assign({}, base.game, (data && data.game) || {});
-  if (!Array.isArray(out.game.bankedDays)) out.game.bankedDays = [];
+  out.game = normGame(Object.assign({}, (data && data.game) || {}));
   Object.keys(base).forEach((k) => {
     if (Array.isArray(base[k]) && !Array.isArray(out[k])) out[k] = [];
   });
@@ -327,6 +328,7 @@ function formValues(root) {
   const out = {};
   $$("[name]", root).forEach((el) => {
     if (el.type === "checkbox") out[el.name] = el.checked;
+    else if (el.type === "radio") { if (el.checked) out[el.name] = el.value; }
     else out[el.name] = el.value;
   });
   return out;
@@ -367,13 +369,14 @@ function ytdFigures() {
 
 /* ---------- the game layer ---------- */
 
-/* THE XP CURVE. Every level costs this much XP. Change the number to tune it:
-   lower levels you up faster, higher makes each level a bigger deal. */
+/* THE XP CURVE (your hero level). Every hero level costs this much XP, counting
+   every stat together. Change the number to tune it: lower levels you up faster,
+   higher makes each level a bigger deal. */
 const XP_PER_LEVEL = 500;
 
-// What a task is worth when you don't set it yourself.
+/* Before the five stats, each task carried its own XP number. Tasks finished back
+   then keep what they earned: their own number, or this if they had none. */
 const DEFAULT_XP = 20;
-const taskXP = (t) => num(t.xp) || DEFAULT_XP;
 
 /* Sample content for the boss and reward cards until step 4 gives them real data. */
 const GAME_SAMPLE = {
@@ -381,12 +384,129 @@ const GAME_SAMPLE = {
   reward: { name: "Sushi night", have: 7, cost: 10 },
 };
 
-/* Everything is worked out from the tasks themselves: a finished task carries its
-   XP and the day it was done. Only what was deleted is kept separately (DB.game). */
+/* ---------- the five stats ----------
+   Every task trains one stat. Each stat has its own level, XP bar and streak, and
+   none of them affects the others. */
+const STATS = [
+  { id: "hustle",   name: "Hustle",   icon: "📦", color: "#FF8A3D", what: "The reselling business" },
+  { id: "craft",    name: "Craft",    icon: "📷", color: "#4A86FF", what: "Photography and video work" },
+  { id: "empire",   name: "Empire",   icon: "👑", color: "#A274FF", what: "The digital products business" },
+  { id: "vitality", name: "Vitality", icon: "💪", color: "#2BB673", what: "Health and personal tasks" },
+  { id: "mind",     name: "Mind",     icon: "🧠", color: "#FF6FB0", what: "Learning and admin" },
+];
+const STAT_IDS = STATS.map((s) => s.id);
+const statById = (id) => STATS.find((s) => s.id === id) || STATS[1];
+
+/* XP comes from priority, not from how big a task is. Booked things happen anyway,
+   so they pay little; urgent, business-critical ones pay the most, so they're the
+   ones worth picking first. */
+const PRIORITIES = [
+  { id: "booked",  name: "Booked",  xp: 10, icon: "📌", hint: "Happening anyway, like a booked shoot" },
+  { id: "regular", name: "Regular", xp: 25, icon: "",   hint: "Everyday tasks" },
+  { id: "urgent",  name: "Urgent",  xp: 50, icon: "⚡", hint: "A client waiting, or money on the line" },
+];
+const prioById = (id) => PRIORITIES.find((p) => p.id === id) || PRIORITIES[1];
+
+/* A task with no stat picked (older tasks, or the add box left on Auto) is placed
+   by the words in it, then by its category. Anything left over is photo work,
+   which is what most of this tracker is for. A word ending in * matches any word
+   starting with it ("edit*" matches "editing"). Add words here to teach it. */
+const STAT_WORDS = {
+  hustle: ["resell*", "resale", "ebay", "depop", "poshmark", "mercari", "grailed", "stockx", "flip*",
+           "listing*", "inventory", "thrift*", "sourcing", "marketplace", "ship", "shipping", "sneaker*"],
+  craft: ["shoot*", "photo*", "video*", "edit*", "cull*", "gallery", "galleries", "lightroom", "premiere",
+          "retouch*", "camera*", "lens*", "reel*", "portfolio", "wedding*", "portrait*", "gig*", "client*",
+          "invoice*", "venue*"],
+  empire: ["preset*", "lut", "luts", "template*", "gumroad", "shopify", "etsy", "product*", "ebook*",
+           "launch*", "newsletter*", "storefront"],
+  vitality: ["gym", "workout*", "run", "running", "walk", "walking", "doctor*", "dentist*", "sleep*",
+             "laundry", "groceries", "grocery", "cook*", "clean*", "haircut", "stretch*", "yoga", "meal*"],
+  mind: ["read", "reading", "learn*", "study*", "tutorial*", "practice*", "tax", "taxes", "admin", "bank*",
+         "bill", "bills", "insurance", "renew*", "paperwork", "budget*", "research*", "podcast*"],
+};
+const CATEGORY_STAT = { Shoot: "craft", Delivery: "craft", Client: "craft", Money: "craft",
+                        Admin: "mind", Errand: "vitality" };
+
+// And with no priority picked, the category is the best hint there is.
+const CATEGORY_PRIO = { Urgent: "urgent", Client: "urgent", Money: "urgent",
+                        Shoot: "booked", Waiting: "booked" };
+
+function guessStat(t) {
+  const words = String(t.text || "").toLowerCase().match(/[a-z0-9]+/g) || [];
+  const hit = (w, k) => (k.endsWith("*") ? w.indexOf(k.slice(0, -1)) === 0 : w === k);
+  let best = null, top = 0;
+  STATS.forEach((s) => {
+    const n = words.filter((w) => STAT_WORDS[s.id].some((k) => hit(w, k))).length;
+    if (n > top) { top = n; best = s.id; }
+  });
+  return best || CATEGORY_STAT[t.category] || "craft";
+}
+
+const statOf = (t) => (STAT_IDS.indexOf(t.stat) >= 0 ? t.stat : guessStat(t));
+const prioOf = (t) => (PRIORITIES.some((p) => p.id === t.prio) ? t.prio : CATEGORY_PRIO[t.category] || "regular");
+const prioXP = (t) => prioById(prioOf(t)).xp;
+
+/* THE STREAK MULTIPLIER. Day 1 of a streak is ×1. Every time the streak doubles,
+   the multiplier goes up by STREAK_STEP: ×1.25 on day 2, ×1.5 on day 4, ×2 on
+   day 16, ×2.5 on day 64. There's no cap, but each step takes twice as long as
+   the one before, so it never runs away. */
+const STREAK_STEP = 0.25;
+function streakMult(days) {
+  return days > 1 ? 1 + STREAK_STEP * Math.log2(days) : 1;
+}
+const fmtMult = (m) => "×" + Math.round(m * 100) / 100;
+
+/* THE STAT CURVE. A stat's first level-up costs STAT_LEVEL_BASE XP, and each one
+   after costs STAT_LEVEL_STEP more than the last: 100, 150, 200, 250… */
+const STAT_LEVEL_BASE = 100;
+const STAT_LEVEL_STEP = 50;
+function statLevel(xp) {
+  let level = 1, need = STAT_LEVEL_BASE, left = Math.max(0, num(xp));
+  while (left >= need) {
+    left -= need;
+    level++;
+    need = STAT_LEVEL_BASE + STAT_LEVEL_STEP * (level - 1);
+  }
+  return { level: level, into: left, need: need };
+}
+
+// What a finished task earned, stamped when it was ticked off so a streak that
+// lapses later never shrinks it.
+function earnedXP(t) {
+  return t.earned ? num(t.earned.xp) : num(t.xp) || DEFAULT_XP;
+}
+
+// What an open task would pay if it were finished now: its priority, times its
+// stat's multiplier with today counted in.
+function previewXP(t, sheet) {
+  return Math.round(prioXP(t) * streakMult((sheet || statSheet())[statOf(t)].nextStreak));
+}
+
+// A finished task shows what it earned; an open one, what it would earn now.
+const taskXP = (t, sheet) => (t.done ? earnedXP(t) : previewXP(t, sheet));
+
+/* DB.game with every part filled in. Older saves have only some of it; this never
+   throws anything away. */
+function normGame(g) {
+  g = g && typeof g === "object" ? g : {};
+  g.bankedXP = num(g.bankedXP);
+  if (!Array.isArray(g.bankedDays)) g.bankedDays = [];
+  if (!g.statBank || typeof g.statBank !== "object") g.statBank = {};
+  const l = g.loot = g.loot && typeof g.loot === "object" ? g.loot : {};
+  if (!l.owned || typeof l.owned !== "object") l.owned = {};
+  if (!l.equip || typeof l.equip !== "object") l.equip = {};
+  if (!Array.isArray(l.runs)) l.runs = [];
+  if (!Array.isArray(l.recent)) l.recent = [];
+  return g;
+}
+const gameData = () => (DB.game = normGame(DB.game));
+
+/* The hero: every stat added together. Worked out from the tasks themselves; only
+   what was deleted is kept separately (DB.game). */
 function gameStats() {
   const g = DB.game || {};
   const done = (DB.todos || []).filter((t) => t.done);
-  const totalXP = num(g.bankedXP) + done.reduce((s, t) => s + taskXP(t), 0);
+  const totalXP = num(g.bankedXP) + done.reduce((s, t) => s + earnedXP(t), 0);
   const days = new Set((g.bankedDays || []).concat(done.map((t) => t.doneAt).filter(Boolean)));
   return {
     totalXP: totalXP,
@@ -395,6 +515,35 @@ function gameStats() {
     xpPerLevel: XP_PER_LEVEL,
     streak: streakFrom(days),
   };
+}
+
+/* Each stat on its own: level, XP and streak, from the finished tasks in it plus
+   whatever was kept from ones since deleted (DB.game.statBank). */
+function statSheet(now) {
+  const bank = (DB.game && DB.game.statBank) || {};
+  const out = {};
+  STATS.forEach((s) => {
+    const b = bank[s.id] || {};
+    out[s.id] = { xp: num(b.xp), days: new Set(b.days || []), done: 0 };
+  });
+  (DB.todos || []).forEach((t) => {
+    if (!t.done) return;
+    const o = out[statOf(t)];
+    o.xp += earnedXP(t);
+    o.done++;
+    if (t.doneAt) o.days.add(t.doneAt);
+  });
+  const today = isoOf(now ? new Date(now) : new Date());
+  STATS.forEach((s) => {
+    const o = out[s.id];
+    Object.assign(o, statLevel(o.xp));
+    o.streak = streakFrom(o.days, now);
+    o.today = o.days.has(today);
+    // The streak the next finished task counts for: today extends the run.
+    o.nextStreak = o.today ? o.streak : o.streak + 1;
+    o.best = bestRun(o.days);
+  });
+  return out;
 }
 
 /* Consecutive days with at least one finished quest, counting back from today.
@@ -408,14 +557,206 @@ function streakFrom(days, now) {
   return n;
 }
 
-// Before finished tasks are deleted, keep what they earned.
-function bankXP(tasks) {
-  DB.game = DB.game || { bankedXP: 0, bankedDays: [] };
-  DB.game.bankedDays = DB.game.bankedDays || [];
-  tasks.filter((t) => t.done).forEach((t) => {
-    DB.game.bankedXP = num(DB.game.bankedXP) + taskXP(t);
-    if (t.doneAt && DB.game.bankedDays.indexOf(t.doneAt) < 0) DB.game.bankedDays.push(t.doneAt);
+// The longest run there has ever been in a set of days.
+function bestRun(days) {
+  let best = 0, run = 0, prev = null;
+  Array.from(days).sort().forEach((d) => {
+    run = prev && addDays(prev, 1) === d ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = d;
   });
+  return best;
+}
+
+// Before finished tasks are deleted, keep what they earned: for the hero, and for
+// their stat, so neither bar goes backwards and no streak day is lost.
+function bankXP(tasks) {
+  const g = gameData();
+  tasks.filter((t) => t.done).forEach((t) => {
+    const xp = earnedXP(t), b = g.statBank[statOf(t)] = g.statBank[statOf(t)] || { xp: 0, days: [] };
+    g.bankedXP = num(g.bankedXP) + xp;
+    b.xp = num(b.xp) + xp;
+    if (!Array.isArray(b.days)) b.days = [];
+    if (t.doneAt && g.bankedDays.indexOf(t.doneAt) < 0) g.bankedDays.push(t.doneAt);
+    if (t.doneAt && b.days.indexOf(t.doneAt) < 0) b.days.push(t.doneAt);
+  });
+}
+
+/* ---------- loot ----------
+   Two ways in. A streak milestone on any stat always drops that stat's badge for
+   it (30, 100 and 365 days add a title too). And every finished task gets one roll
+   at LOOT_CHANCE for a bonus: a title, a skin for the XP bars, or a backdrop for
+   the page. Once everything has been found, bonus rolls pay CHEST_XP instead. */
+const LOOT_CHANCE = 0.08;
+const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100, 365];
+const CHEST_XP = 50;
+
+// How often each rarity comes up, relative to the others.
+const RARITY = {
+  common: { name: "Common", weight: 6 },
+  rare:   { name: "Rare",   weight: 3 },
+  epic:   { name: "Epic",   weight: 1 },
+};
+
+const LOOT_KINDS = { title: "Title", bar: "Bar skin", backdrop: "Backdrop", badge: "Badge", chest: "Bonus XP" };
+
+// The random drops. Equip them on the Personal tab.
+const LOOT = [
+  { id: "t-caffeinated",   kind: "title", rarity: "common", name: "the Caffeinated" },
+  { id: "t-inbox",         kind: "title", rarity: "common", name: "Inbox Slayer" },
+  { id: "t-lists",         kind: "title", rarity: "common", name: "List Crusher" },
+  { id: "t-golden",        kind: "title", rarity: "common", name: "Golden Hour Chaser" },
+  { id: "t-sidequest",     kind: "title", rarity: "common", name: "Side Quest Enjoyer" },
+  { id: "t-receipts",      kind: "title", rarity: "common", name: "Keeper of Receipts" },
+  { id: "t-boxes",         kind: "title", rarity: "common", name: "Professional Box Ticker" },
+  { id: "t-shutter",       kind: "title", rarity: "rare",   name: "Shutter Wizard" },
+  { id: "t-bassdrop",      kind: "title", rarity: "rare",   name: "Bass Drop Survivor" },
+  { id: "t-unbothered",    kind: "title", rarity: "rare",   name: "the Unbothered" },
+  { id: "t-deadline",      kind: "title", rarity: "rare",   name: "Deadline Whisperer" },
+  { id: "t-nightowl",      kind: "title", rarity: "rare",   name: "Night Owl Supreme" },
+  { id: "t-maincharacter", kind: "title", rarity: "epic",   name: "Main Character" },
+  { id: "t-freelancer",    kind: "title", rarity: "epic",   name: "the Legendary Freelancer" },
+  { id: "t-errandboss",    kind: "title", rarity: "epic",   name: "Final Boss of Errands" },
+
+  { id: "bar-stripes", kind: "bar", rarity: "common", name: "Candy stripes" },
+  { id: "bar-dots",    kind: "bar", rarity: "common", name: "Polka dots" },
+  { id: "bar-checker", kind: "bar", rarity: "rare",   name: "Checkerboard" },
+  { id: "bar-gloss",   kind: "bar", rarity: "rare",   name: "Glossy" },
+  { id: "bar-rainbow", kind: "bar", rarity: "epic",   name: "Rainbow" },
+
+  { id: "bg-dots",     kind: "backdrop", rarity: "common", name: "Dots" },
+  { id: "bg-grid",     kind: "backdrop", rarity: "common", name: "Graph paper" },
+  { id: "bg-diagonal", kind: "backdrop", rarity: "rare",   name: "Diagonals" },
+  { id: "bg-checker",  kind: "backdrop", rarity: "rare",   name: "Checkers" },
+  { id: "bg-confetti", kind: "backdrop", rarity: "epic",   name: "Confetti" },
+  { id: "bg-sunburst", kind: "backdrop", rarity: "epic",   name: "Sunburst" },
+];
+
+// Titles only long streaks can earn, one set per stat.
+const STREAK_TITLES = {
+  hustle:   { 30: "the Flipper", 100: "Resale Royalty",  365: "Hustle Legend" },
+  craft:    { 30: "Shutterbug",  100: "Master of Light", 365: "Craft Legend" },
+  empire:   { 30: "the Founder", 100: "the Mogul",       365: "Empire Legend" },
+  vitality: { 30: "Iron Will",   100: "Unbreakable",     365: "Vitality Legend" },
+  mind:     { 30: "the Scholar", 100: "the Sage",        365: "Mind Legend" },
+};
+
+const badgeRarity = (days) => (days >= 60 ? "epic" : days >= 14 ? "rare" : "common");
+
+// Any item by id. Badges and streak titles are made from the stats rather than
+// listed: "badge-craft-7", "st-craft-30".
+function lootItem(id) {
+  const fixed = LOOT.find((x) => x.id === id);
+  if (fixed) return fixed;
+  const m = /^(badge|st)-([a-z]+)-(\d+)$/.exec(id || "");
+  if (!m || STAT_IDS.indexOf(m[2]) < 0) return null;
+  const s = statById(m[2]), days = Number(m[3]);
+  if (m[1] === "badge") {
+    return { id: id, kind: "badge", rarity: badgeRarity(days), stat: s.id, days: days,
+             name: s.name + " · " + days + "-day streak" };
+  }
+  const name = STREAK_TITLES[s.id][days];
+  return name ? { id: id, kind: "title", rarity: "epic", stat: s.id, days: days, name: name } : null;
+}
+
+// Into the collection. A second copy of a badge counts up rather than vanishing.
+function grantLoot(item, today) {
+  const l = gameData().loot;
+  const had = l.owned[item.id];
+  l.owned[item.id] = { at: (had && had.at) || today, n: (had ? num(had.n) : 0) + 1 };
+  l.recent.unshift({ id: item.id, at: today });
+  l.recent = l.recent.slice(0, 12);
+  return { item: item, again: !!had };
+}
+
+// The bonus roll. Only things not found yet can drop; with nothing left, a chest.
+function rollLoot(rng) {
+  const r = rng || Math.random;
+  if (r() >= LOOT_CHANCE) return null;
+  const owned = gameData().loot.owned;
+  const pool = LOOT.filter((x) => !owned[x.id]);
+  if (!pool.length) return { id: "chest", kind: "chest", rarity: "rare", name: "Treasure chest" };
+  const total = pool.reduce((s, x) => s + RARITY[x.rarity].weight, 0);
+  let pick = r() * total;
+  for (let i = 0; i < pool.length; i++) {
+    pick -= RARITY[pool[i].rarity].weight;
+    if (pick < 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+/* Milestones the stat's current run has reached but not yet paid for. A run is
+   known by the day it started, so un-ticking and re-ticking a task can't claim
+   the same badge twice, while a fresh run after a break earns it again. */
+function milestonesDue(statId, streak, today) {
+  if (!streak) return [];
+  const start = addDays(today, -(streak - 1));
+  const paid = gameData().loot.runs;
+  return STREAK_MILESTONES.filter((m) => m <= streak)
+    .map((m) => statId + ":" + m + ":" + start)
+    .filter((k) => paid.indexOf(k) < 0);
+}
+
+/* Ticking a task off: stamp its XP at today's multiplier, pay out any streak
+   milestone its stat just reached, and give it its one roll for bonus loot.
+   Returns what dropped, for the celebration. `rng` is there for the tests. */
+function awardTask(t, rng) {
+  const today = t.doneAt || todayISO();
+  t.stat = statOf(t);                     // settle the guess, so it can't drift later
+  t.prio = prioOf(t);
+  const o = statSheet()[t.stat];          // already counts today, since t is done
+  const mult = streakMult(o.streak);
+  t.earned = { xp: Math.round(prioXP(t) * mult), mult: Math.round(mult * 100) / 100 };
+
+  const l = gameData().loot;
+  const drops = [];
+  milestonesDue(t.stat, o.streak, today).forEach((key) => {
+    l.runs.push(key);
+    const days = Number(key.split(":")[1]);
+    drops.push(grantLoot(lootItem("badge-" + t.stat + "-" + days), today));
+    const title = lootItem("st-" + t.stat + "-" + days);
+    if (title && !l.owned[title.id]) drops.push(grantLoot(title, today));
+  });
+
+  if (!t.rolled) {
+    t.rolled = true;
+    const item = rollLoot(rng);
+    if (item && item.kind === "chest") {
+      const g = gameData();
+      const b = g.statBank[t.stat] = g.statBank[t.stat] || { xp: 0, days: [] };
+      g.bankedXP += CHEST_XP;
+      b.xp = num(b.xp) + CHEST_XP;
+      drops.push({ item: Object.assign({}, item, { name: "+" + CHEST_XP + " " + statById(t.stat).name + " XP" }) });
+    } else if (item) {
+      drops.push(grantLoot(item, today));
+    }
+  }
+  return drops;
+}
+
+// The equipped title, if it's one you own.
+function heroTitle() {
+  const l = (DB.game && DB.game.loot) || {};
+  const id = l.equip && l.equip.title;
+  const item = id && l.owned && l.owned[id] ? lootItem(id) : null;
+  return item ? item.name : "";
+}
+
+// The equipped bar skin and backdrop, as attributes the stylesheet reads.
+function applyCosmetics() {
+  const l = (DB && DB.game && DB.game.loot) || {};
+  const eq = l.equip || {}, owned = l.owned || {};
+  const on = (id) => (id && owned[id] ? id : "");
+  document.body.dataset.bar = on(eq.bar);
+  document.body.dataset.backdrop = on(eq.backdrop);
+}
+
+function equipLoot(kind, id) {
+  const l = gameData().loot;
+  if (id && !l.owned[id]) return;
+  l.equip[kind] = id || "";
+  save();
+  render();
 }
 
 function firstName() {
@@ -540,6 +881,7 @@ function render() {
   const wasOpen = switchingTab ? [] : openGroupKeys();
 
   document.body.dataset.view = state.view;   // lets CSS widen only where needed
+  applyCosmetics();
   renderHeader();
   renderTabbar();
   $("#view").innerHTML = VIEWS[state.view]();
@@ -738,11 +1080,27 @@ function todoCard() {
   return '<p class="card-title">To do' +
     (openCount ? ' <span class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">\u00b7 ' +
       openCount + " left</span>" : "") + "</p>" +
-    '<div class="todo-add">' +
-    '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200">' +
-    '<button class="btn btn-sm" data-act="add-todo">Add</button>' +
-    '<button class="btn btn-sm" data-act="new-task" title="With a category, due date and notes">\u2699</button></div>' +
+    todoAddRow('<button class="btn btn-sm" data-act="new-task" title="With a category, due date and notes">\u2699</button>') +
     '<div id="todo-list">' + todoListHTML() + "</div>";
+}
+
+/* The quick-add row. The stat stays as you left it, so a run of tasks for the same
+   thing goes quickly; priority goes back to Regular each time, so Urgent is always
+   a choice you make on purpose. */
+function todoAddRow(extra) {
+  const st = state.addStat || "";
+  return '<div class="todo-add">' +
+    '<input id="todo-input" type="text" placeholder="Add a task\u2026" maxlength="200" aria-label="New task">' +
+    '<select id="todo-stat" aria-label="Stat it trains">' +
+    '<option value="">\u2728 Auto</option>' +
+    STATS.map((x) => '<option value="' + x.id + '"' + (x.id === st ? " selected" : "") + ">" +
+      x.icon + " " + x.name + "</option>").join("") + "</select>" +
+    '<select id="todo-prio" aria-label="Priority">' +
+    ["regular", "urgent", "booked"].map((id) => {
+      const p = prioById(id);
+      return '<option value="' + id + '">' + (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " XP</option>";
+    }).join("") + "</select>" +
+    '<button class="btn btn-sm" data-act="add-todo">Add</button>' + (extra || "") + "</div>";
 }
 
 /* Money reads as owed, Urgent as urgent, Delivery/Shoot as work in hand. Anything
@@ -814,13 +1172,39 @@ function checkBtn(t) {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>';
 }
 
-function xpPill(t) {
-  return '<span class="xp-pill' + (t.done ? " earned" : "") + '">' +
-    (t.done ? "\u2713 " : "+") + taskXP(t) + " XP</span>";
+/* What a task pays. Open tasks show what they'd earn right now, streak included;
+   urgent ones are painted loud, booked ones quiet. */
+function xpPill(t, sheet) {
+  const p = prioById(prioOf(t));
+  const s = statById(statOf(t));
+  let why;
+  if (t.done) {
+    const m = t.earned ? t.earned.mult : 1;
+    why = "Earned for " + s.name + (m > 1 ? ", with a " + fmtMult(m) + " streak bonus" : "");
+  } else {
+    const m = streakMult((sheet || statSheet())[s.id].nextStreak);
+    why = p.name + " pays " + p.xp + " XP" + (m > 1 ? ", " + fmtMult(m) + " for your " + s.name + " streak" : "");
+  }
+  return '<span class="xp-pill prio-' + p.id + (t.done ? " earned" : "") + '" title="' + esc(why) + '">' +
+    (t.done ? "\u2713 " : "+") + taskXP(t, sheet) + " XP</span>";
+}
+
+function statChip(t) {
+  const s = statById(statOf(t));
+  return '<span class="chip stat-chip" style="--stat:' + s.color + '"><span aria-hidden="true">' +
+    s.icon + "</span> " + s.name + "</span>";
+}
+
+// Regular is the default and goes unsaid. An "Urgent" category already says it.
+function prioChip(t) {
+  const p = prioById(prioOf(t));
+  if (p.id === "regular" || (p.id === "urgent" && t.category === "Urgent")) return "";
+  return '<span class="chip prio-chip prio-' + p.id + '"><span aria-hidden="true">' + p.icon + "</span> " +
+    p.name + "</span>";
 }
 
 function taskMeta(t) {
-  return (t.category
+  return statChip(t) + prioChip(t) + (t.category
     ? '<span class="chip ' + (CATEGORY_TONE[t.category] || "") + '">' + esc(t.category) + "</span>"
     : "") + dueTag(t);
 }
@@ -837,7 +1221,7 @@ function taskRow(t, opts) {
     (meta ? '<div class="taskmeta">' + meta + "</div>" : "") +
     notesHTML(t) +
     "</div>" +
-    (o.restore ? "" : xpPill(t)) +
+    (o.restore ? "" : xpPill(t, o.sheet)) +
     '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
     (o.restore
       ? '<button class="btn btn-sm" data-act="toggle-todo" data-id="' + t.id + '">Restore</button>'
@@ -862,12 +1246,20 @@ function questCard(t, o) {
     (o.fromLog ? '<button class="btn btn-sm quest-add" data-act="pick-task" data-id="' + t.id +
       '" data-rank="0">Add to today</button>' : "") +
     "</div>" +
-    '<div class="quest-side">' + xpPill(t) +
+    '<div class="quest-side">' + xpPill(t, o.sheet) +
     '<div class="quest-tools">' +
     '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
     (slotted ? '<button class="iconbtn" data-act="untop-todo" data-id="' + t.id +
       '" title="Back to the quest log" aria-label="Move back to the quest log">\u21a9</button>' : "") +
     "</div></div></div>";
+}
+
+// Radio buttons drawn as the chunky option chips. They're real radios, so the form
+// reads them and the keyboard moves between them.
+function radioChips(name, labelledBy, items, selected) {
+  return '<div class="opts" role="radiogroup" aria-labelledby="' + labelledBy + '">' + items.map((it) =>
+    '<label class="opt"><input type="radio" name="' + name + '" value="' + esc(it.value) + '"' +
+    (it.value === selected ? " checked" : "") + ">" + it.label + "</label>").join("") + "</div>";
 }
 
 function taskForm(rec) {
@@ -883,8 +1275,14 @@ function taskForm(rec) {
     '<div class="field"><label>Due <span class="hint">optional</span></label>' +
     '<input type="date" name="due" value="' + esc(t.due || "") + '"></div>' +
     "</div>" +
-    '<div class="field"><label>XP reward <span class="hint">bigger task, bigger reward</span></label>' +
-    '<input type="number" name="xp" min="1" max="1000" step="1" value="' + taskXP(t) + '"></div>' +
+    '<div class="field"><label id="lbl-stat">Stat <span class="hint">what this trains</span></label>' +
+    radioChips("stat", "lbl-stat", STATS.map((x) => ({ value: x.id, label: x.icon + " " + x.name })),
+      t.id ? statOf(t) : (state.addStat || "")) + "</div>" +
+    '<div class="field"><label id="lbl-prio">Priority <span class="hint">XP comes from priority, not size</span></label>' +
+    radioChips("prio", "lbl-prio", PRIORITIES.map((p) => ({ value: p.id,
+      label: (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " XP" })), prioOf(t)) +
+    '<p class="field-note">' + PRIORITIES.map((p) => "<strong>" + p.name + ":</strong> " + esc(p.hint.toLowerCase()))
+      .join(" \u00b7 ") + "</p></div>" +
     '<div class="field"><label>Notes <span class="hint">the detail you\u2019d otherwise forget</span></label>' +
     '<textarea name="notes" rows="6">' + esc(t.notes || "") + "</textarea></div>" +
     "</form>";
@@ -903,14 +1301,16 @@ function saveTask(id) {
                             top: false, topRank: null };
   Object.assign(rec, {
     text: v.text.trim(), category: v.category, due: v.due, notes: v.notes.trim(),
-    xp: Math.max(1, Math.round(num(v.xp))) || DEFAULT_XP,
+    prio: prioById(v.prio || prioOf(rec)).id,
   });
+  // No stat picked: guess from the words and category just saved.
+  rec.stat = STAT_IDS.indexOf(v.stat) >= 0 ? v.stat : guessStat(rec);
   if (!existing) DB.todos.push(rec);
   save(); closeModal(); render();
 }
 
 // `skipId` leaves out a task already shown as Today's up-next quest.
-function todoListHTML(skipId) {
+function todoListHTML(skipId, sheet) {
   const open = (DB.todos || []).filter((t) => !t.done && !t.top && t.id !== skipId);
   if (!open.length) {
     const slotted = !!skipId || (DB.todos || []).some((t) => t.top && !t.done);
@@ -924,7 +1324,8 @@ function todoListHTML(skipId) {
     if (!!a.due !== !!b.due) return a.due ? -1 : 1;
     return (a.due || "").localeCompare(b.due || "");
   });
-  return sorted.map((t) => taskRow(t, { draggable: true })).join("");
+  const sh = sheet || statSheet();
+  return sorted.map((t) => taskRow(t, { draggable: true, sheet: sh })).join("");
 }
 
 
@@ -1051,9 +1452,14 @@ function addTodo() {
   if (!input) return;
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
+  const statSel = $("#todo-stat"), prioSel = $("#todo-prio");
+  state.addStat = (statSel && statSel.value) || "";
+  const rec = { id: uid(), text: text, done: false, created: todayISO(), doneAt: null,
+                top: false, topRank: null, category: "", due: "", notes: "",
+                prio: prioById(prioSel && prioSel.value).id };
+  rec.stat = state.addStat || guessStat(rec);
   DB.todos = DB.todos || [];
-  DB.todos.push({ id: uid(), text: text, done: false, created: todayISO(), doneAt: null,
-                  top: false, topRank: null, category: "", due: "", notes: "" });
+  DB.todos.push(rec);
   save();
   refreshTodoList();
   // On Today the whole screen re-renders (the Top 3 slots depend on this list),
@@ -1067,22 +1473,30 @@ function addTodo() {
 function toggleTodo(id) {
   const t = (DB.todos || []).find((x) => x.id === id);
   if (!t) return;
-  const before = gameStats();
+  const before = gameStats(), sheetBefore = statSheet();
   // Where the click happened. Finishing moves the card, but the reward belongs here.
   const was = $('.checkbtn[data-id="' + id + '"]');
   const at = was ? was.getBoundingClientRect() : null;
   t.done = !t.done;
   t.doneAt = t.done ? todayISO() : null;
-  if (t.done) { t.top = false; t.topRank = null; }   // finishing frees its slot
+  let drops = [];
+  if (t.done) {
+    t.top = false; t.topRank = null;   // finishing frees its slot
+    drops = awardTask(t);
+  } else {
+    delete t.earned;                   // re-earned at the day's rate if ticked again
+  }
   save();
   refreshTodoList();
-  if (t.done) playReward(t, before, gameStats(), at);
+  if (t.done) playReward(t, before, gameStats(), at, sheetBefore, drops);
 }
 
-/* The reward for ticking something off: the check pops, "+20 XP" floats up from
-   it, the bar fills from where it was. Under a second, so it never slows you down.
-   A new level gets a short celebration on top. */
-function playReward(t, before, after, at) {
+/* The reward for ticking something off: the check pops, "+40 XP" floats up from
+   it in the stat's colour, and that stat's bar fills from where it was. Under a
+   second, so it never slows you down. Level-ups and loot queue up after. */
+function playReward(t, before, after, at, sheetBefore, drops) {
+  const s = statById(statOf(t));
+  const xp = earnedXP(t);
   const btn = $('.checkbtn[data-id="' + t.id + '"]');
   if (btn) btn.classList.add("pop");
   const r = at || (btn && btn.getBoundingClientRect());
@@ -1090,7 +1504,8 @@ function playReward(t, before, after, at) {
     const f = document.createElement("div");
     f.className = "xp-float";
     f.setAttribute("aria-hidden", "true");
-    f.textContent = "+" + taskXP(t) + " XP";
+    f.style.setProperty("--stat", s.color);
+    f.textContent = "+" + xp + " " + s.name + " XP";
     f.style.left = (r.left + r.width / 2) + "px";
     f.style.top = r.top + "px";
     document.body.appendChild(f);
@@ -1098,35 +1513,120 @@ function playReward(t, before, after, at) {
   }
   const pill = $(".hud-xp");
   if (pill) pill.classList.add("bump");
-  playStrike(taskXP(t));
+  playStrike(xp);
 
-  const levelUp = after.level > before.level;
-  const fill = $(".xpbar .meter-fill");
-  if (fill) {
-    const to = fill.style.width;
-    fill.style.transition = "none";
-    fill.style.width = (levelUp ? 0 : Math.round(before.xpIntoLevel / before.xpPerLevel * 100)) + "%";
-    void fill.offsetWidth;            // commit the start width before animating
-    fill.style.transition = "";
-    fill.style.width = to;
+  const b = sheetBefore[s.id], a = statSheet()[s.id];
+  const statUp = a.level > b.level;
+  const tile = $('.stat-tile[data-stat="' + s.id + '"]');
+  if (tile) {
+    const fill = tile.querySelector(".meter-fill");
+    if (fill) {
+      const to = fill.style.width;
+      fill.style.transition = "none";
+      fill.style.width = (statUp ? 0 : Math.round(b.into / b.need * 100)) + "%";
+      void fill.offsetWidth;            // commit the start width before animating
+      fill.style.transition = "";
+      fill.style.width = to;
+    }
+    tile.classList.add("bump");
+    if (a.streak > b.streak) {
+      const flame = tile.querySelector(".streak");
+      if (flame) flame.classList.add("bump");
+    }
   }
-  if (levelUp) celebrateLevel(after.level);
+
+  if (statUp) {
+    celebrate({ kicker: s.name + " level up!", big: "Level " + a.level, statColor: s.color,
+                art: '<span class="drop-art stat-art" aria-hidden="true">' + s.icon + "</span>" });
+  }
+  if (after.level > before.level) celebrateLevel(after.level);
+  (drops || []).forEach(celebrateDrop);
+}
+
+/* Celebrations queue, so a level-up and a loot drop never land on top of each
+   other. Level-ups clear themselves; loot waits for a tap, so it can't be missed. */
+const celebrations = [];
+
+function celebrate(c) {
+  celebrations.push(c);
+  if (!$(".levelup")) nextCelebration();
+}
+
+function nextCelebration() {
+  const c = celebrations.shift();
+  if (!c) return;
+  const box = document.createElement("div");
+  box.className = "levelup" + (c.stay ? " stay" : "");
+  box.setAttribute("role", c.stay ? "dialog" : "status");
+  if (c.stay) box.setAttribute("aria-label", c.kicker);
+  box.innerHTML = '<div class="levelup-card on-yellow' + (c.drop ? " drop" : "") + '"' +
+    (c.statColor ? ' style="--stat:' + c.statColor + '"' : "") + ">" +
+    '<div class="levelup-burst" aria-hidden="true">' +
+    Array.from({ length: 12 }, (_, i) => '<i style="--a:' + (i * 30) + 'deg"></i>').join("") + "</div>" +
+    (c.art || "") +
+    '<div class="levelup-kicker">' + esc(c.kicker) + "</div>" +
+    '<div class="levelup-level">' + esc(c.big) + "</div>" +
+    (c.sub || "") + (c.actions || "") + "</div>";
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    box.remove();
+    nextCelebration();
+  };
+  // Any click closes it. An Equip button inside still does its job first, through
+  // the page's own click handler.
+  box.addEventListener("click", close);
+  if (!c.stay) setTimeout(close, 2200);
+  document.body.appendChild(box);
+  if (c.stay) {
+    const first = box.querySelector("button");
+    if (first) first.focus();
+  }
 }
 
 function celebrateLevel(level) {
-  const old = $(".levelup");
-  if (old) old.remove();
-  const box = document.createElement("div");
-  box.className = "levelup";
-  box.setAttribute("role", "status");
-  box.innerHTML = '<div class="levelup-card on-yellow">' +
-    '<div class="levelup-burst" aria-hidden="true">' +
-    Array.from({ length: 12 }, (_, i) => '<i style="--a:' + (i * 30) + 'deg"></i>').join("") + "</div>" +
-    '<div class="levelup-kicker">Level up!</div>' +
-    '<div class="levelup-level">Level ' + level + "</div></div>";
-  box.addEventListener("click", () => box.remove());
-  document.body.appendChild(box);
-  setTimeout(() => box.remove(), 2200);
+  celebrate({ kicker: "Hero level up!", big: "Level " + level });
+}
+
+// A loot drop: what it is, how rare, and a button to wear it straight away.
+function celebrateDrop(d) {
+  const it = d.item;
+  const wearable = it.kind === "title" || it.kind === "bar" || it.kind === "backdrop";
+  const kicker = it.kind === "badge" ? "Streak milestone!"
+    : it.kind === "chest" ? "Treasure chest!" : "Loot drop!";
+  const sub = '<p class="drop-tags"><span class="tag tag-' + it.rarity + '">' + RARITY[it.rarity].name + "</span>" +
+    '<span class="tag">' + LOOT_KINDS[it.kind] + "</span>" +
+    (d.again ? '<span class="tag">Earned again</span>' : "") + "</p>" +
+    (it.kind === "chest" ? '<p class="drop-note">You\u2019ve found everything, so bonus rolls pay XP now.</p>' : "");
+  celebrate({
+    stay: true, drop: true, kicker: kicker, big: it.name, art: lootArt(it), sub: sub,
+    statColor: it.stat ? statById(it.stat).color : "",
+    actions: '<div class="drop-actions">' +
+      (wearable ? '<button class="btn btn-primary" data-act="loot-equip" data-kind="' + it.kind +
+        '" data-id="' + it.id + '">Equip</button>' : "") +
+      '<button class="btn">' + (wearable ? "Later" : "Nice!") + "</button></div>",
+  });
+}
+
+// A picture of an item: a medal, a scroll, a little bar, a backdrop swatch.
+function lootArt(it) {
+  if (it.kind === "badge") return medalHTML(it, true);
+  if (it.kind === "bar") {
+    return '<div class="meter meter-xp meter-stat skin-preview drop-art-bar" data-skin="' + it.id +
+      '" aria-hidden="true" style="--stat:#4A86FF"><div class="meter-fill" style="width:72%"></div></div>';
+  }
+  if (it.kind === "backdrop") return '<span class="drop-art bd-swatch" data-bd="' + it.id + '" aria-hidden="true"></span>';
+  return '<span class="drop-art" aria-hidden="true">' + (it.kind === "chest" ? "🎁" : "📜") + "</span>";
+}
+
+// A streak badge: the stat's icon on a medal in the stat's colour, with the days.
+function medalHTML(it, big, count) {
+  const s = statById(it.stat);
+  return '<span class="medal medal-' + it.rarity + (big ? " big" : "") + '" style="--stat:' + s.color + '"' +
+    (big ? ' aria-hidden="true"' : ' role="img" aria-label="' + esc(it.name) + (count > 1 ? ", earned " + count + " times" : "") + '"') +
+    ">" + '<span class="medal-icon">' + s.icon + "</span><b>" + it.days + "</b>" +
+    (count > 1 ? '<span class="medal-n">\u00d7' + count + "</span>" : "") + "</span>";
 }
 
 /* What actually earned the money, rather than just that money arrived.
@@ -1632,8 +2132,9 @@ function todaysQuests() {
 
 // The slime's health is the XP still on the table today.
 function battleState(q) {
-  const maxHP = q.quests.concat(q.doneToday).reduce((s, t) => s + taskXP(t), 0);
-  const hp = q.quests.reduce((s, t) => s + taskXP(t), 0);
+  const sheet = statSheet();
+  const maxHP = q.quests.concat(q.doneToday).reduce((s, t) => s + taskXP(t, sheet), 0);
+  const hp = q.quests.reduce((s, t) => s + taskXP(t, sheet), 0);
   return { maxHP, hp, won: maxHP > 0 && hp === 0, asleep: maxHP === 0 };
 }
 
@@ -1659,7 +2160,9 @@ function battleCard(q, level) {
     '<div class="victory" aria-hidden="true">Victory!</div>' +
     "</div>" +
     '<div class="battle-info">' +
-    '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong> <span class=\"lv\">Lv " + level + "</span>" +
+    '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong>" +
+    (heroTitle() ? ' <span class="title-tag">' + esc(heroTitle()) + "</span>" : "") +
+    ' <span class="lv">Lv ' + level + "</span>" +
     ' <span class="vs">vs</span> <strong>' + slimeName + " Slime</strong></p>" +
     (b.asleep ? "" :
       '<div class="meter meter-hp" role="progressbar" aria-label="Slime health" aria-valuemin="0" aria-valuemax="' +
@@ -1858,6 +2361,16 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-01", title: "Five stats, streak multipliers and loot",
+    asked: "Five separate stats, each with its own level, XP bar and streak: Hustle for reselling, Craft for photo and video, Empire for digital products, Vitality for health and personal tasks, Mind for learning and admin. XP by priority rather than size, a streak multiplier per stat with no cap, and light loot drops.",
+    changed: [
+      "Today opens on your five stats. Each has its own level, XP bar and streak; missing a day only resets that one stat.",
+      "Every task trains one stat. Pick it when you add the task, or leave it on Auto and it’s guessed from the words. Change it any time with ✎.",
+      "XP now comes from priority: Booked 10, Regular 25, Urgent 50. Urgent quests are painted red so they stand out. Tasks finished before today keep the XP they earned.",
+      "Streaks multiply XP: ×1.25 on day 2, ×1.5 on day 4, ×2 on day 16, and it keeps climbing, more slowly each time.",
+      "Streaks of 3, 7, 14, 30, 60, 100 and 365 days always drop a badge (30+ adds a title). Every finished task also has an 8% chance of a bonus title, bar skin or backdrop.",
+      "Personal tab: a stat sheet with each stat’s detail and badges, “How XP works”, and a Loot section to wear what you’ve found.",
+    ] },
   { date: "2026-10-01", title: "Quests swap places",
     asked: "Dragging one of today\u2019s quests onto Up next replaced it and sent it back to the quest log. Make them switch places instead.",
     changed: [
@@ -1916,18 +2429,118 @@ function changelogHTML() {
       : "");
 }
 
+/* ---------- Personal: the stat sheet and the loot ---------- */
+
+function statFact(label, value) {
+  return "<div><dt>" + label + "</dt><dd>" + value + "</dd></div>";
+}
+
+// One stat, folded to a single line; open it for the detail and its badges.
+function statRow(s, o, owned) {
+  const next = STREAK_MILESTONES.find((m) => m > o.streak);
+  const mult = streakMult(o.nextStreak);
+  const step = Math.pow(2, Math.floor(Math.log2(o.nextStreak)) + 1);
+  return '<details class="card stat-row" style="--stat:' + s.color + '">' +
+    '<summary class="stat-tile">' +
+    '<span class="stat-icon" aria-hidden="true">' + s.icon + "</span>" +
+    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv ' + o.level + "</span></span>" +
+    statMeter(s, o) + '<span class="stat-foot">' + streakTag(s, o) + "</span></summary>" +
+    '<div class="stat-detail"><p class="stat-what">' + esc(s.what) + "</p>" +
+    '<dl class="stat-facts">' +
+    statFact("Next level", (o.need - o.into) + " XP to Level " + (o.level + 1)) +
+    statFact("Total", o.xp.toLocaleString() + " XP") +
+    statFact("Streak", (o.streak ? o.streak + (o.streak === 1 ? " day" : " days") +
+      (o.today ? "" : ", finish one today to keep it") : "None yet") +
+      (o.best ? " \u00b7 best " + o.best : "")) +
+    statFact("Multiplier", fmtMult(mult) + " on the next task \u00b7 " + fmtMult(streakMult(step)) + " on day " + step) +
+    statFact("Next badge", next ? next + "-day streak, " + (next - o.streak) + " to go" : "Every badge earned") +
+    "</dl>" +
+    '<div class="medals" aria-label="' + s.name + ' streak badges">' + STREAK_MILESTONES.map((m) => {
+      const it = lootItem("badge-" + s.id + "-" + m);
+      return owned[it.id] ? medalHTML(it, false, num(owned[it.id].n))
+        : '<span class="medal locked" role="img" aria-label="' + m + '-day badge, not earned yet"><b>' + m + "</b></span>";
+    }).join("") + "</div></div></details>";
+}
+
+function howXPHTML() {
+  return '<details class="card how-xp"><summary>How XP works</summary><div class="how-body">' +
+    "<p><strong>Priority sets the XP,</strong> not how big a task is: " +
+    PRIORITIES.map((p) => p.name + " " + p.xp).join(" \u00b7 ") +
+    ". Urgent pays the most because it\u2019s the one worth doing first.</p>" +
+    "<p><strong>Streaks multiply it.</strong> Each stat keeps its own streak: finish a task in it on days in a row. " +
+    "Missing a day resets that stat only. " +
+    [1, 2, 4, 8, 16, 32, 64].map((d) => fmtMult(streakMult(d)) + " on day " + d).join(", ") +
+    ", and it keeps going.</p>" +
+    "<p><strong>Loot.</strong> A streak of " + STREAK_MILESTONES.join(", ") +
+    " days always drops a badge, and 30, 100 and 365 add a title. Every finished task also has a " +
+    Math.round(LOOT_CHANCE * 100) + "% chance of a bonus: a title, a bar skin or a backdrop.</p>" +
+    "</div></details>";
+}
+
+function lootOpt(kind, id, label, on) {
+  return '<button type="button" class="opt" data-act="loot-equip" data-kind="' + kind + '" data-id="' + id +
+    '" aria-pressed="' + on + '">' + label + "</button>";
+}
+
+function lootPreview(kind, id) {
+  if (kind === "bar") {
+    return '<span class="meter meter-xp meter-stat skin-preview mini" data-skin="' + id +
+      '" aria-hidden="true" style="--stat:#4A86FF"><span class="meter-fill"></span></span>';
+  }
+  if (kind === "backdrop") return '<span class="bd-swatch mini" data-bd="' + id + '" aria-hidden="true"></span>';
+  return "";
+}
+
+// Everything found so far, to wear. What's still hidden stays a surprise.
+function lootHTML() {
+  const l = (DB.game && DB.game.loot) || {};
+  const owned = l.owned || {}, eq = l.equip || {};
+  const found = LOOT.filter((x) => owned[x.id]).length;
+  const group = (kind, label, none) => {
+    const items = kind === "title"
+      ? Object.keys(owned).map(lootItem).filter((x) => x && x.kind === "title")
+      : LOOT.filter((x) => x.kind === kind && owned[x.id]);
+    const hidden = LOOT.filter((x) => x.kind === kind && !owned[x.id]).length;
+    const current = eq[kind] && owned[eq[kind]] ? eq[kind] : "";
+    return '<div class="loot-group"><h3 id="loot-' + kind + '">' + label + "</h3>" +
+      '<div class="opts" role="group" aria-labelledby="loot-' + kind + '">' +
+      lootOpt(kind, "", lootPreview(kind, "") + none, !current) +
+      items.map((it) => lootOpt(kind, it.id, lootPreview(kind, it.id) + esc(it.name), current === it.id)).join("") +
+      "</div>" +
+      '<p class="loot-hidden">' + (hidden ? hidden + " more to find" : "All found!") + "</p></div>";
+  };
+  const recent = (l.recent || []).slice(0, 5).map((r) => lootItem(r.id)).filter(Boolean);
+  return '<h2 class="section-head">Loot <span class="count">' + found + " / " + LOOT.length + "</span></h2>" +
+    '<p class="page-lede">Bonus drops from finished tasks. Tap one you\u2019ve found to wear it.</p>' +
+    '<section class="card loot-card">' +
+    group("title", "Title", "No title") + group("bar", "Bar skin", "Classic") + group("backdrop", "Backdrop", "Plain") +
+    (recent.length ? '<p class="loot-recent"><strong>Recent:</strong> ' +
+      recent.map((it) => esc(it.name)).join(" \u00b7 ") + "</p>" : "") +
+    "</section>";
+}
+
 VIEWS.personal = function () {
   const h = heroOf();
   const g = gameStats();
+  const sheet = statSheet();
+  const owned = ((DB.game && DB.game.loot) || {}).owned || {};
   const tag = state.playbookTag || "All";
   const tip = tipOfDay();
+  const title = heroTitle();
   let html = "";
 
   html += '<section class="card hero-card">' + heroPortrait(h) +
     '<div class="hero-card-text"><h1>' + esc(heroName(h)) + "</h1>" +
+    (title ? '<p class="hero-title"><span class="title-tag">' + esc(title) + "</span></p>" : "") +
     '<p>Level ' + g.level + " · " + g.totalXP.toLocaleString() + " XP · " +
       (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
     '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button></div></section>';
+
+  html += '<h2 class="section-head">Stats</h2>' +
+    '<p class="page-lede">Five stats, each with its own level and streak. Tap one for the detail and its badges.</p>' +
+    howXPHTML() + '<div class="stat-rows">' + STATS.map((s) => statRow(s, sheet[s.id], owned)).join("") + "</div>";
+
+  html += lootHTML();
 
   html += '<h2 class="section-head">Today’s power-up</h2>' + playbookCard(tip, true);
 
@@ -1951,29 +2564,61 @@ function addPlaybookQuest(id) {
   if (!p) return;
   DB.todos = DB.todos || [];
   DB.todos.push({ id: uid(), text: p.quest, done: false, created: todayISO(), doneAt: null,
-                  top: false, topRank: null, category: "", due: "", notes: p.title, xp: DEFAULT_XP });
+                  top: false, topRank: null, category: "", due: "", notes: p.title,
+                  stat: "mind", prio: "regular" });
   state.addedTips = state.addedTips || {};
   state.addedTips[id] = true;
   save();
   render();
 }
 
+/* ---------- the five stats, as Today shows them ---------- */
+
+function streakTag(s, o) {
+  if (!o.streak) return '<span class="streak cold" title="Finish a ' + s.name + ' task to start a streak">No streak</span>';
+  const tip = o.today ? o.streak + "-day " + s.name + " streak, today done"
+    : o.streak + "-day " + s.name + " streak. Finish a " + s.name + " task today to keep it";
+  return '<span class="streak ' + (o.today ? "lit" : "at-risk") + '" title="' + esc(tip) + '">' +
+    '<span aria-hidden="true">\ud83d\udd25</span> ' + o.streak + "</span>";
+}
+
+function statMeter(s, o) {
+  const pct = Math.min(100, Math.round(o.into / o.need * 100));
+  // Spans, so the bar can sit inside a <summary> too.
+  return '<span class="meter meter-xp meter-stat" role="progressbar" aria-label="' + s.name +
+    " XP toward level " + (o.level + 1) + '" aria-valuemin="0" aria-valuemax="' + o.need +
+    '" aria-valuenow="' + o.into + '"><span class="meter-fill" style="width:' + pct + '%"></span></span>';
+}
+
+// One stat: icon, name and level, its XP bar, then streak, multiplier and XP.
+function statTile(s, o) {
+  return '<div class="stat-tile" data-stat="' + s.id + '" style="--stat:' + s.color + '">' +
+    '<span class="stat-icon" aria-hidden="true">' + s.icon + "</span>" +
+    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv ' + o.level + "</span></span>" +
+    statMeter(s, o) +
+    '<span class="stat-foot">' + streakTag(s, o) +
+    '<span class="stat-mult" title="Multiplier on your next ' + s.name + ' task">' + fmtMult(streakMult(o.nextStreak)) + "</span>" +
+    '<span class="stat-xp">' + o.into + "/" + o.need + "</span></span></div>";
+}
+
+function statsPanel(sheet, g) {
+  return '<section class="card stats-panel" aria-labelledby="stats-h">' +
+    '<div class="stats-head"><h2 id="stats-h">Your stats</h2>' +
+    '<a href="#" class="stats-hero" data-act="goto" data-view="personal" title="Hero level: every stat added together">' +
+    "Hero Lv " + g.level + " \u00b7 " + g.xpIntoLevel + " / " + g.xpPerLevel + " XP \u203a</a></div>" +
+    '<div class="stat-tiles">' + STATS.map((s) => statTile(s, sheet[s.id])).join("") + "</div></section>";
+}
+
 VIEWS.today = function () {
   const g = gameStats();
+  const sheet = statSheet();
   const s = GAME_SAMPLE;
   const todos = DB.todos || [];
   const today = todayISO();
   let html = "";
 
-  /* ---- XP bar, full width under the header ---- */
-  const pct = Math.min(100, Math.round(g.xpIntoLevel / g.xpPerLevel * 100));
-  html += '<section class="card xpbar">' +
-    '<div class="xpbar-head"><span class="xpbar-title">' +
-    (pct >= 60 ? "Level " + (g.level + 1) + " is close" : "On the way to Level " + (g.level + 1)) + "</span>" +
-    '<span class="xpbar-num">' + g.xpIntoLevel + " / " + g.xpPerLevel + " XP</span></div>" +
-    '<div class="meter" role="progressbar" aria-label="XP toward the next level" aria-valuemin="0" aria-valuemax="' +
-      g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
-    "</section>";
+  /* ---- the five stats, full width under the header ---- */
+  html += statsPanel(sheet, g);
 
   /* ---- today's quests: your Top 3 picks, plus what you finished today.
      Nothing picked? Up next falls back to the open task due soonest, so there is
@@ -1988,7 +2633,7 @@ VIEWS.today = function () {
   html += '<div class="quest-head"><h2>Today’s quests</h2>' +
     (total ? '<span class="count-pill">' + doneToday.length + " of " + total + " done</span>" : "") + "</div>";
 
-  quests.forEach((t, i) => { html += questCard(t, { upNext: i === 0, fromLog: t === fallback }); });
+  quests.forEach((t, i) => { html += questCard(t, { upNext: i === 0, fromLog: t === fallback, sheet: sheet }); });
 
   // One open slot at a time: a drop target for dragging, a button for tapping.
   const used = picked.map((t) => t.topRank);
@@ -2012,11 +2657,8 @@ VIEWS.today = function () {
     (open.length ? ' <span class="count">' + open.length + "</span>" : "") +
     '<button class="btn btn-sm section-action" data-act="new-task"' +
     ' title="With a category, due date and notes">＋ New task</button></h2>';
-  html += '<div class="card card-pad todo-card">' +
-    '<div class="todo-add">' +
-    '<input id="todo-input" type="text" placeholder="Add a task…" maxlength="200" aria-label="New task">' +
-    '<button class="btn btn-sm" data-act="add-todo">Add</button></div>' +
-    '<div id="todo-list">' + todoListHTML(fallback && fallback.id) + "</div></div>";
+  html += '<div class="card card-pad todo-card">' + todoAddRow() +
+    '<div id="todo-list">' + todoListHTML(fallback && fallback.id, sheet) + "</div></div>";
 
   const done = todos.filter((t) => t.done);
   if (done.length) {
@@ -2026,7 +2668,7 @@ VIEWS.today = function () {
       // Newest first, and each one can be put back rather than only deleted.
       const recent = done.slice().sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
       html += '<div class="card card-pad todo-card">' +
-        recent.map((t) => taskRow(t, { restore: true })).join("") +
+        recent.map((t) => taskRow(t, { restore: true, sheet: sheet })).join("") +
         '<button class="btn btn-sm btn-ghost" data-act="clear-done" style="margin-top:10px">Clear ' +
         done.length + " finished</button></div>";
     }
@@ -5646,6 +6288,7 @@ document.addEventListener("click", (e) => {
       save(); closeModal(); render();
       break;
     case "toggle-todo": toggleTodo(id); break;
+    case "loot-equip": equipLoot(el.dataset.kind, id); break;
     case "hero-edit": heroEditor(); break;
     case "hero-opt": heroPick(el.dataset.key, el.dataset.val); break;
     case "hero-save": heroSave(); break;
@@ -5841,6 +6484,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.id === "todo-input") { e.preventDefault(); addTodo(); return; }
+  if (e.key === "Escape" && $(".levelup")) { $(".levelup").click(); return; }
   if (e.key === "Escape" && $(".modal-backdrop")) closeModal();
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
     const btn = $(".modal-foot .btn-primary");
