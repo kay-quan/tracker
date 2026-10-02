@@ -2857,6 +2857,12 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "Easier to read on a phone",
+    asked: "On my phone it looked so condensed it was hard to read.",
+    changed: [
+      "The pixel lettering is kept for big titles and buttons only. Every small label (stat names, levels, streaks, EXP tags, the status bar, tabs) is plain bold text at a readable size.",
+      "Stat rows on a phone have more room, and the bottom menu labels fit their buttons.",
+    ] },
   { date: "2026-10-02", title: "The real MapleStory art, and a closet",
     asked: "It didn’t look like MapleStory. Make the monsters and my character look like the real ones, with the Big Bang-era look of the fan site, and give me a closet to pick and search outfits like the game.",
     changed: [

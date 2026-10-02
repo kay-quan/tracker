@@ -4210,6 +4210,70 @@ body { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
 }
 
 
+/* ---------- readability ----------
+   The pixel lettering only reads at 16px and up, so it's kept for titles,
+   plates and buttons. Every small label is plain bold instead, at a size a
+   phone can read at arm's length. */
+.hud-pill, .minimap, .stats-hero, .stats-hero:hover, .stat-name, .stat-lv, .stat-mult, .stat-xp, .streak,
+.count-pill, .section-head .count, .disclosure .count, .upnext-tag, .xp-pill, .tag, .card-title,
+.stat .label, .stat .lbl, .trio-label, th, .mob-table th, .stat-facts dt, .how-xp > summary,
+.closet-tab, .worn-name, .closet-sub, .sb-name, .sb-label, .tab-label, .lv-label, .chips .chip, .fbtn, .seg, .opt, .opt:hover {
+  font-family: var(--font);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.hud-pill { font-size: 16px; }
+.minimap { font-size: 15px; }
+.stats-hero, .stats-hero:hover { font-size: 15px; }
+.stat-name { font-size: 14px; font-weight: 800; }
+.stat-lv { font-size: 14px; }
+.stat-mult, .stat-xp, .streak { font-size: 14px; }
+.count-pill, .section-head .count, .disclosure .count { font-size: 15px; }
+.upnext-tag { font-size: 14px; }
+.xp-pill { font-size: 16px; padding: 3px 10px; }
+.tag { font-size: 13px; }
+.card-title, .stat .label, .stat .lbl, .trio-label { font-size: 15px; }
+th, .mob-table th { font-size: 14px; }
+.mob-table { font-size: 17px; }
+.stat-facts dt { font-size: 13px; }
+.how-xp > summary { font-size: 17px; }
+.btn, .btn-sm { font-size: 16px; }
+.chips .chip, .fbtn, .seg, .opt, .opt:hover { font-size: 16px; }
+.nametag { font-size: 14px; }
+.sb-num { font-size: 13px; }
+.sb-meso { font-size: 15px; }
+.sb-name, .sb-label { font-size: 15px; }
+.lv-label { font-size: 16px; }
+.closet-tab { font-size: 15px; }
+.slot-name { font-size: 13px; }
+.worn-name { font-size: 13px; }
+.rival { font-size: 13px; }
+.closet-sub { font-size: 16px; }
+.levelup-card.drop .levelup-kicker { font-family: var(--font); font-weight: 800; font-size: 15px; }
+
+@media (max-width: 640px) {
+  .section-head, .quest-head { font-size: 16px; padding: 8px 14px; min-height: 46px; }
+  .app-title { font-size: 26px; }
+  .tab-label { font-size: 12px; text-transform: none; letter-spacing: 0; }
+  .tab, .tab:hover { min-height: 54px; padding-left: 0; padding-right: 0; }
+  .sb-num { font-size: 13px; }
+  .sb-meso { font-size: 14px; }
+  .sb-gauge { height: 20px; }
+  /* Stat rows: room to breathe, and nothing under 14px. */
+  .stat-tiles { gap: 10px; }
+  .stat-tiles .stat-tile { grid-template-columns: 36px 92px minmax(0, 1fr) 92px; padding: 10px 12px; column-gap: 10px; }
+  .stat-tiles .streak { font-size: 14px; }
+  .stat-icon { width: 36px; height: 36px; font-size: 19px; }
+  .stat-name { font-size: 14px; }
+  .stat-lv { font-size: 14px; }
+  .meter-stat { height: 16px; }
+  .stats-head { padding: 10px 14px; }
+  .nametag { font-size: 13px; }
+  .xp-pill { font-size: 15px; }
+  .tasktitle { font-size: 21px; }
+  .closet-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+}
+
 /* The maps. Each is one drawing: sky, scenery and ground, anchored to the bottom.
    Drawn for this app in the spirit of the game's towns; nothing is taken from it. */
 body, .bd-swatch { --map: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 600' preserveAspectRatio='xMidYMax slice'%3E%3Cdefs%3E%3ClinearGradient id='s' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%237FC8F8'/%3E%3Cstop offset='.62' stop-color='%23CBEBFF'/%3E%3Cstop offset='1' stop-color='%23EAF7FF'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1200' height='600' fill='url(%23s)'/%3E%3Cg fill='%23fff' opacity='.92'%3E%3Cellipse cx='170' cy='110' rx='86' ry='22'/%3E%3Cellipse cx='136' cy='98' rx='40' ry='26'/%3E%3Cellipse cx='196' cy='92' rx='48' ry='32'/%3E%3Cellipse cx='560' cy='70' rx='86' ry='22'/%3E%3Cellipse cx='526' cy='58' rx='40' ry='26'/%3E%3Cellipse cx='586' cy='52' rx='48' ry='32'/%3E%3Cellipse cx='930' cy='130' rx='86' ry='22'/%3E%3Cellipse cx='896' cy='118' rx='40' ry='26'/%3E%3Cellipse cx='956' cy='112' rx='48' ry='32'/%3E%3C/g%3E%3Cpath d='M0 420 Q120 350 260 400 T560 392 T860 380 T1200 404 V600 H0Z' fill='%23BFE8A2'/%3E%3Cg transform='translate(150 300) scale(0.9)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23F28A1E' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cg transform='translate(880 290) scale(1.0)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23E8564A' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cg transform='translate(1010 330) scale(0.7)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23F2B01E' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cpath d='M0 470 Q180 425 380 462 T780 456 T1200 470 V600 H0Z' fill='%238FD45F'/%3E%3Cpath d='M0 520 Q300 495 600 515 T1200 512 V600 H0Z' fill='%236CC24A'/%3E%3Cpath d='M0 520 Q300 495 600 515 T1200 512' fill='none' stroke='%234E9A34' stroke-width='6'/%3E%3C/svg%3E"); }
