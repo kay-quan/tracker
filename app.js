@@ -859,19 +859,18 @@ function renderHeader() {
   }
 
   const f = ytdFigures();
-  const today = new Date().toLocaleDateString(undefined,
-    { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const today = new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
   // One quiet line under the title: the date, then where you are and what it takes
   // to land the year. Everything a glance should answer, and nothing else.
   $("#app-meta").innerHTML =
     '<span class="meta-line">' +
-    '<span class="meta-date">' + esc(today) + "</span>" +
-    '<span class="meta-stat">YTD net <strong>' + money(f.net) + "</strong></span>" +
+    '<span class="meta-date"><span aria-hidden="true">📅</span> ' + esc(today) + "</span>" +
+    '<span class="meta-stat"><span aria-hidden="true">💰</span> Year to date <strong>' + money(f.net) + "</strong></span>" +
     (f.goal
       ? '<span class="meta-stat" title="To reach ' + esc(money(f.goal)) + " by year end, with " +
-        f.weeksLeft.toFixed(1) + ' weeks to go">Goal pace <strong>' + money(f.pace) + "</strong>/wk</span>"
-      : '<a href="#" class="meta-stat" data-act="set-goal">Set an income goal</a>') +
+        f.weeksLeft.toFixed(1) + ' weeks to go"><span aria-hidden="true">🎯</span> Goal pace <strong>' + money(f.pace) + "</strong>/wk</span>"
+      : '<a href="#" class="meta-stat meta-link" data-act="set-goal"><span aria-hidden="true">🎯</span> Set an income goal</a>') +
     "</span>";
 }
 
@@ -3195,6 +3194,15 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "Fold-away sections, readable text and tidier spacing",
+    asked: "The text above the sections on the Personal tab was hard to read. Let me close \u201cWhat goes where\u201d, the loot and the medals. The spacing looked stretched, and the calendar and the date / year-to-date line were hard to read.",
+    changed: [
+      "Personal tab: every section (What goes where, Stats, Loot, Today\u2019s power-up, The playbook, Update log) folds away when you tap its heading, and stays how you left it. Medal, Gauge skin and Map fold separately too.",
+      "Any text that sits on the map has a dark backing now, so it reads over clouds and trees.",
+      "The line under your name is tidy chips: \u201cFri, Oct 2\u201d, \u201cYear to date $\u2026\u201d and your income goal.",
+      "Calendar: the month name sits in a bar that fits on a phone, the three money boxes sit side by side, and the month is one framed grid with readable day numbers.",
+      "Spacing is even across tabs, and rows of buttons on a phone are a neat two-column grid instead of ragged single lines.",
+    ] },
   { date: "2026-10-02", title: "Bosses, rewards, the Gachapon, a world map and a stat key",
     asked: "A key on the Personal tab for what each stat is for. The \u201cCan\u2019t decide?\u201d button, the boss card and the next reward were only samples: make them work and editable. Are there other maps besides Henesys?",
     changed: [
@@ -3276,6 +3284,29 @@ const CHANGELOG = [
     ] },
 ];
 
+/* ---------- sections that fold away ----------
+   Tap a heading to close its section; it stays as you left it on this device.
+   Everything starts open. */
+function foldState() {
+  try { return JSON.parse(localStorage.getItem("tracker.folds") || "{}") || {}; } catch (e) { return {}; }
+}
+const foldOpen = (key) => foldState()[key] !== false;
+
+function fold(key, head, intro, body) {
+  return '<details class="fold" data-fold="' + key + '"' + (foldOpen(key) ? " open" : "") + ">" +
+    '<summary class="section-head fold-head"><span class="fold-title">' + head + "</span>" +
+    '<span class="fold-caret" aria-hidden="true"></span></summary>' +
+    '<div class="fold-body">' + (intro ? '<p class="fold-intro">' + intro + "</p>" : "") + body + "</div></details>";
+}
+
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!d || !d.dataset || !d.dataset.fold) return;
+  const s = foldState();
+  if (d.open) delete s[d.dataset.fold]; else s[d.dataset.fold] = false;
+  try { localStorage.setItem("tracker.folds", JSON.stringify(s)); } catch (err) { /* private mode: just don't remember */ }
+}, true);
+
 function changelogEntry(e) {
   return '<article class="card log-entry">' +
     '<div class="log-head"><time datetime="' + e.date + '">' +
@@ -3289,13 +3320,12 @@ function changelogEntry(e) {
 // The two newest stay open; older ones fold away so the tab doesn't grow forever.
 function changelogHTML() {
   const recent = CHANGELOG.slice(0, 2), older = CHANGELOG.slice(2);
-  return '<h2 class="section-head">Update log</h2>' +
-    '<p class="page-lede">What you asked for, and what changed, newest first.</p>' +
+  return fold("log", "Update log", "What you asked for, and what changed, newest first.",
     recent.map(changelogEntry).join("") +
     (older.length
       ? '<details class="log-older"><summary>Older updates <span class="count">' + older.length +
         "</span></summary>" + older.map(changelogEntry).join("") + "</details>"
-      : "");
+      : ""));
 }
 
 /* ---------- Personal: the stat sheet and the loot ---------- */
@@ -3389,23 +3419,28 @@ function lootHTML() {
     const hidden = kind === "backdrop" ? LOOT.filter((x) => x.kind === kind && !mapOpen(x.id)).length
       : LOOT.filter((x) => x.kind === kind && !owned[x.id]).length;
     const current = eq[kind] && (kind === "backdrop" ? mapOpen(eq[kind]) : owned[eq[kind]]) ? eq[kind] : "";
-    return '<div class="loot-group"><h3 id="loot-' + kind + '">' + label + "</h3>" +
-      '<div class="opts" role="group" aria-labelledby="loot-' + kind + '">' +
+    const key = "loot-" + kind;
+    const wearing = current ? (lootItem(current) || {}).name : none;
+    return '<details class="loot-group" data-fold="' + key + '"' + (foldOpen(key) ? " open" : "") + ">" +
+      '<summary class="loot-head"><span class="loot-label" id="' + key + '">' + label + "</span>" +
+      '<span class="loot-wearing">' + esc(wearing) + "</span>" +
+      '<span class="fold-caret" aria-hidden="true"></span></summary>' +
+      '<div class="opts" role="group" aria-labelledby="' + key + '">' +
       lootOpt(kind, "", lootPreview(kind, "") + none, !current) +
       items.map((it) => lootOpt(kind, it.id, lootPreview(kind, it.id) + esc(it.name), current === it.id)).join("") +
       "</div>" +
-      '<p class="loot-hidden">' + (hidden ? hidden + (kind === "backdrop" ? " more towns to reach" : " more to find") : "All found!") + "</p></div>";
+      '<p class="loot-hidden">' + (hidden ? hidden + (kind === "backdrop" ? " more towns to reach" : " more to find") : "All found!") + "</p></details>";
   };
   const recent = (l.recent || []).slice(0, 5).map((r) => lootItem(r.id)).filter(Boolean);
-  return '<h2 class="section-head">Loot <span class="count">' + found + " / " + LOOT.length + "</span></h2>" +
-    '<p class="page-lede">Bonus drops from finished quests. Tap one you\u2019ve found to equip it.</p>' +
+  return fold("loot", 'Loot <span class="count">' + found + " / " + LOOT.length + "</span>",
+    "Bonus drops from finished quests. Tap one you\u2019ve found to equip it.",
     '<section class="card loot-card">' +
     group("title", "Medal", "No medal") + group("bar", "Gauge skin", "Classic") + group("backdrop", "Map", "Henesys") +
     '<p class="loot-world"><button type="button" class="btn btn-sm" data-act="world-map">🗺 World map</button> ' +
     "Towns open as your hero levels up, or sooner if one drops.</p>" +
     (recent.length ? '<p class="loot-recent"><strong>Recent:</strong> ' +
       recent.map((it) => esc(it.name)).join(" \u00b7 ") + "</p>" : "") +
-    "</section>";
+    "</section>");
 }
 
 VIEWS.personal = function () {
@@ -3425,28 +3460,26 @@ VIEWS.personal = function () {
       (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
     '<button class="btn btn-sm" data-act="hero-edit">👕 Closet</button></div></section>';
 
-  html += '<h2 class="section-head">What goes where</h2>' +
-    '<p class="page-lede">Every task trains one stat. Pick it when you add a task, or leave it on Auto and the words decide.</p>' +
-    statGuideHTML();
+  html += fold("guide", "What goes where",
+    "Every task trains one stat. Pick it when you add a task, or leave it on Auto and the words decide.",
+    statGuideHTML());
 
-  html += '<h2 class="section-head">Stats</h2>' +
-    '<p class="page-lede">Five stats, each with its own level and streak. Tap one for the detail and its badges.</p>' +
-    howXPHTML() + '<div class="stat-rows">' + STATS.map((s) => statRow(s, sheet[s.id], owned)).join("") + "</div>";
+  html += fold("stats", "Stats",
+    "Five stats, each with its own level and streak. Tap one for the detail and its badges.",
+    howXPHTML() + '<div class="stat-rows">' + STATS.map((s) => statRow(s, sheet[s.id], owned)).join("") + "</div>");
 
   html += lootHTML();
 
-  html += '<h2 class="section-head">Today’s power-up</h2>' + playbookCard(tip, true);
+  html += fold("powerup", "Today’s power-up", "", playbookCard(tip, true));
 
-  html += '<h2 class="section-head">The playbook</h2>' +
-    '<p class="page-lede">Tricks for getting things done with an ADHD brain. Each has a source, and an honest note on how solid the evidence is. Try one at a time.</p>' +
+  html += fold("playbook", "The playbook",
+    "Tricks for getting things done with an ADHD brain. Each has a source, and an honest note on how solid the evidence is. Try one at a time.",
     '<div class="chips" role="group" aria-label="Filter tips">' +
     PLAYBOOK_TAGS.map((t) => '<button class="chip' + (t === tag ? " active" : "") + '" data-act="playbook-tag" data-tag="' +
-      esc(t) + '" aria-pressed="' + (t === tag) + '">' + esc(t) + "</button>").join("") + "</div>";
-
-  html += '<div class="tips">' + PLAYBOOK.filter((p) => tag === "All" || p.tag === tag)
-    .map((p) => playbookCard(p, false)).join("") + "</div>";
-
-  html += '<p class="fine-print">General self-help ideas, not medical advice. If ADHD is getting in the way, a doctor or an ADHD-informed therapist can help you find what works for you.</p>';
+      esc(t) + '" aria-pressed="' + (t === tag) + '">' + esc(t) + "</button>").join("") + "</div>" +
+    '<div class="tips">' + PLAYBOOK.filter((p) => tag === "All" || p.tag === tag)
+      .map((p) => playbookCard(p, false)).join("") + "</div>" +
+    '<p class="fine-print">General self-help ideas, not medical advice. If ADHD is getting in the way, a doctor or an ADHD-informed therapist can help you find what works for you.</p>');
 
   html += changelogHTML();
   return html;

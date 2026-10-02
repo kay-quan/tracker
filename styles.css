@@ -4311,6 +4311,160 @@ button.minimap:hover { background: rgba(14, 18, 26, 0.9); border-color: #FFD800;
 .town-lock { font-size: 14px; color: var(--ink-3); }
 .town .btn { align-self: flex-start; }
 
+/* ---------- text on the map, header chips, spacing ----------
+   Anything written straight on the map sits on a dark glass backing so it reads
+   over clouds, trees and rooftops alike. Sections keep one rhythm: 24px between
+   them, 12px from a heading to what it heads. */
+
+.page-lede, .fold-intro, .fine-print, .page-head p {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 8px 14px;
+  font-family: var(--font);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.45;
+  color: #FFFFFF;
+  text-shadow: none;
+  background: rgba(12, 16, 26, 0.74);
+  border-radius: 8px;
+}
+.fine-print { margin-top: 16px; font-size: 15px; }
+.page-head p { font-size: 15px; padding: 5px 12px; }
+
+.app-meta { margin-top: 10px; text-shadow: none; }
+.meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.meta-date, .meta-stat, a.meta-stat {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px;
+  padding: 4px 12px;
+  font-family: var(--font); font-weight: 700; font-size: 15px;
+  color: #FFFFFF;
+  text-shadow: none;
+  text-decoration: none;
+  background: rgba(12, 16, 26, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+}
+.meta-stat strong { color: #FFE27A; font-weight: 700; }
+a.meta-stat:hover { border-color: #FFD800; }
+
+.section-head { margin: 26px 0 12px; }
+.card + .card, .stack { margin-bottom: 16px; }
+.quest, .quest.slot.filled, .slot.quest-slot { margin-bottom: 12px; }
+.hero-card { margin-bottom: 0; }
+.page-head { margin-bottom: 14px; gap: 12px; }
+.page-head h1 { font-family: var(--pixel); font-size: 26px; color: #FFFFFF; text-shadow: var(--outline-text); }
+.page-actions { gap: 8px; }
+
+/* Folding sections: the heading is the switch. */
+.fold { margin: 24px 0 0; }
+summary.fold-head { cursor: pointer; list-style: none; margin: 0 0 12px; user-select: none; }
+summary.fold-head::-webkit-details-marker { display: none; }
+.fold:not([open]) > summary.fold-head { margin-bottom: 0; }
+.fold-title { display: inline-flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.fold-caret {
+  flex: none;
+  margin-left: auto;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.fold-caret::after { content: "\25BE"; font-size: 16px; line-height: 1; color: #FFD800; transition: transform 0.15s; }
+.fold:not([open]) > summary .fold-caret::after,
+.loot-group:not([open]) > summary .fold-caret::after { transform: rotate(-90deg); }
+summary.fold-head:hover .fold-caret { background: rgba(255, 255, 255, 0.28); }
+.fold-body > :last-child { margin-bottom: 0; }
+.fold-body .stat-rows { margin-bottom: 0; }
+
+/* Loot groups fold too, each on its own line with what you're wearing. */
+.loot-group, .loot-group + .loot-group { margin: 0; padding: 0; border: 0; }
+.loot-group + .loot-group { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.loot-head { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; list-style: none; }
+.loot-head::-webkit-details-marker { display: none; }
+.loot-label { font-family: var(--pixel); font-weight: 700; font-size: 16px; text-transform: uppercase; color: var(--ink); }
+.loot-wearing { font-weight: 700; font-size: 15px; color: var(--ink-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loot-head .fold-caret { background: var(--grey); box-shadow: inset 0 0 0 1px var(--grey-edge); }
+.loot-head .fold-caret::after { color: #1E242C; }
+.loot-group[open] > .loot-head { margin-bottom: 10px; }
+.loot-card { padding: 14px 18px; }
+
+/* ---------- the calendar ---------- */
+
+.cal-head {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--plate);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 0 2px #B8BFC9, 0 0 0 4px #1E242C, var(--shadow-sm);
+}
+.cal-head h2 {
+  flex: 1; min-width: 0;
+  margin: 0;
+  font-family: var(--font); font-weight: 800; font-size: 20px;
+  color: #FFD800; text-shadow: 0 2px 0 #000;
+  text-align: center; white-space: nowrap;
+}
+.cal-head .btn { min-height: 38px; padding: 4px 12px; }
+.monthstrip { gap: 10px; margin-bottom: 14px; }
+.monthstrip .stat { padding: 12px 14px; margin: 0; }
+.monthstrip .val { font-size: 24px; }
+.cal-grid {
+  gap: 4px;
+  padding: 10px;
+  background: var(--silver);
+  border-radius: 10px;
+  box-shadow: var(--frame), var(--shadow);
+}
+.cal-dow { font-family: var(--font); font-weight: 800; font-size: 13px; color: var(--ink-2); text-shadow: none; padding: 0 0 6px; }
+.cal-day { background: #FFFFFF; border: 1px solid #C3C9D1; border-radius: 6px; padding: 4px 5px; box-shadow: none; }
+.cal-day:hover { border-color: #6E7782; background: #F7F9FC; }
+.cal-day.sel, .cal-day.open { background: #FFF6C2; border-color: #C99A00; box-shadow: inset 0 0 0 1px #C99A00; }
+.cal-date { font-family: var(--font); font-weight: 700; font-size: 14px; color: var(--ink); }
+.cal-day.today .cal-date { background: #F28A0C; color: #FFFFFF; }
+.cal-grid.gigs .cal-day, .cal-grid.events .cal-day { min-height: 84px; }
+.legend, .legend-sm {
+  width: fit-content;
+  margin-top: 10px;
+  padding: 4px 12px;
+  color: #FFFFFF;
+  text-shadow: none;
+  background: rgba(12, 16, 26, 0.74);
+  border-radius: 6px;
+}
+
+@media (max-width: 640px) {
+  .section-head { margin: 22px 0 10px; }
+  .fold { margin-top: 20px; }
+  .page-head h1 { font-size: 22px; }
+  .page-lede, .fold-intro, .fine-print { font-size: 15px; padding: 8px 12px; }
+  .meta-date, .meta-stat, a.meta-stat { font-size: 14px; min-height: 32px; padding: 3px 10px; }
+  .cal-head h2 { font-size: 18px; }
+  .cal-head .btn { padding: 4px 10px; }
+  /* The calendar's three money boxes sit side by side; Money's month cards stack. */
+  .monthstrip:has(> .stat) { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .monthstrip .stat { padding: 8px 10px; }
+  .monthstrip .lbl { font-size: 13px; letter-spacing: 0; }
+  .monthstrip .val { font-size: 17px; }
+  .monthstrip .sub { display: none; }
+  /* Rows of buttons: an even two-column grid instead of ragged single lines. */
+  .btn-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .btn-row > .btn { width: 100%; justify-content: center; text-align: center; white-space: normal;
+                    font-size: 14px; line-height: 1.2; padding: 8px 6px; min-height: 46px; margin: 0; }
+  .btn-row > .segmented { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .btn-row > .btn:first-child:last-child,
+  .btn-row > .btn:nth-child(odd):last-child,
+  .btn-row > .segmented ~ .btn:nth-child(even):last-child { grid-column: 1 / -1; }
+  .stat-trio .trio-label, .stat-trio .lbl { font-size: 13px; }
+  .cal-grid { padding: 6px; gap: 3px; }
+  .cal-grid.gigs .cal-day, .cal-grid.events .cal-day { min-height: 54px; }
+  .cal-day { padding: 2px 3px; }
+  .cal-date { font-size: 13px; }
+}
+
 /* ---------- readability ----------
    The pixel lettering only reads at 16px and up, so it's kept for titles,
    plates and buttons. Every small label is plain bold instead, at a size a
