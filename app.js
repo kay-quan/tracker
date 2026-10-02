@@ -598,9 +598,9 @@ const RARITY = {
   epic:   { name: "Epic",   weight: 1 },
 };
 
-const LOOT_KINDS = { title: "Title", bar: "Bar skin", backdrop: "Backdrop", badge: "Badge", chest: "Bonus XP" };
+const LOOT_KINDS = { title: "Medal", bar: "Gauge skin", backdrop: "Map", badge: "Badge", chest: "Bonus EXP" };
 
-// The random drops. Equip them on the Personal tab.
+// The random drops. Equip them on the Personal tab. Titles show as medals.
 const LOOT = [
   { id: "t-caffeinated",   kind: "title", rarity: "common", name: "the Caffeinated" },
   { id: "t-inbox",         kind: "title", rarity: "common", name: "Inbox Slayer" },
@@ -624,12 +624,14 @@ const LOOT = [
   { id: "bar-gloss",   kind: "bar", rarity: "rare",   name: "Glossy" },
   { id: "bar-rainbow", kind: "bar", rarity: "epic",   name: "Rainbow" },
 
-  { id: "bg-dots",     kind: "backdrop", rarity: "common", name: "Dots" },
-  { id: "bg-grid",     kind: "backdrop", rarity: "common", name: "Graph paper" },
-  { id: "bg-diagonal", kind: "backdrop", rarity: "rare",   name: "Diagonals" },
-  { id: "bg-checker",  kind: "backdrop", rarity: "rare",   name: "Checkers" },
-  { id: "bg-confetti", kind: "backdrop", rarity: "epic",   name: "Confetti" },
-  { id: "bg-sunburst", kind: "backdrop", rarity: "epic",   name: "Sunburst" },
+  /* Maps: the scene behind every screen and the battle. Henesys is where you start.
+     (The ids are from when these were patterns; found ones keep working.) */
+  { id: "bg-dots",     kind: "backdrop", rarity: "common", name: "Ellinia" },
+  { id: "bg-grid",     kind: "backdrop", rarity: "common", name: "Kerning City" },
+  { id: "bg-diagonal", kind: "backdrop", rarity: "rare",   name: "Perion" },
+  { id: "bg-checker",  kind: "backdrop", rarity: "rare",   name: "Lith Harbor" },
+  { id: "bg-confetti", kind: "backdrop", rarity: "epic",   name: "Ludibrium" },
+  { id: "bg-sunburst", kind: "backdrop", rarity: "epic",   name: "Orbis" },
 ];
 
 // Titles only long streaks can earn, one set per stat.
@@ -726,7 +728,7 @@ function awardTask(t, rng) {
       const b = g.statBank[t.stat] = g.statBank[t.stat] || { xp: 0, days: [] };
       g.bankedXP += CHEST_XP;
       b.xp = num(b.xp) + CHEST_XP;
-      drops.push({ item: Object.assign({}, item, { name: "+" + CHEST_XP + " " + statById(t.stat).name + " XP" }) });
+      drops.push({ item: Object.assign({}, item, { name: "+" + CHEST_XP + " " + statById(t.stat).name + " EXP" }) });
     } else if (item) {
       drops.push(grantLoot(item, today));
     }
@@ -764,15 +766,24 @@ function firstName() {
 }
 
 // Level, streak and XP. Shown on every screen: progress you can always see.
+// Level and EXP live in the status bar along the bottom. Up here, like a buff in
+// the corner of the game screen: the streak, and all the EXP ever earned.
 function renderHud() {
   const g = gameStats();
   $("#hud").innerHTML =
-    '<span class="hud-pill hud-level" title="Your level"><i class="e" aria-hidden="true">\u2b50</i>Level ' + g.level + "</span>" +
     '<span class="hud-pill hud-streak" title="Days in a row with a finished quest"><i class="e" aria-hidden="true">\ud83d\udd25</i>' +
       // No streak yet (or it lapsed): an invitation, not a scolding.
       (g.streak ? g.streak + "-day streak" : "Start a streak") + "</span>" +
-    '<span class="hud-pill hud-xp" title="All the XP you have earned"><i class="e" aria-hidden="true">\u26a1</i>' +
-      g.totalXP.toLocaleString() + " XP</span>";
+    '<span class="hud-pill hud-xp" title="All the EXP you have earned"><i class="e" aria-hidden="true">\u2728</i>' +
+      g.totalXP.toLocaleString() + " EXP</span>";
+}
+
+// The map you're on: the one you've equipped, or Henesys.
+function mapName() {
+  const l = (DB.game && DB.game.loot) || {};
+  const id = l.equip && l.equip.backdrop;
+  const item = id && l.owned && l.owned[id] ? lootItem(id) : null;
+  return item ? item.name : "Henesys";
 }
 
 function renderHeader() {
@@ -784,8 +795,11 @@ function renderHeader() {
   document.title = name ? name + " \u00b7 Tracker" : "Income Tracker";
   renderHud();
 
-  // Today is the game screen and keeps its header to the greeting and the HUD.
-  if (state.view === "today") { $("#app-meta").innerHTML = ""; return; }
+  // Today is the game screen: the greeting, the HUD, and the map's name.
+  if (state.view === "today") {
+    $("#app-meta").innerHTML = '<span class="minimap"><span aria-hidden="true">🍁</span> ' + esc(mapName()) + "</span>";
+    return;
+  }
 
   const f = ytdFigures();
   const today = new Date().toLocaleDateString(undefined,
@@ -848,16 +862,32 @@ function tabBadge(view) {
 // Sub-screens light up their parent tab rather than leaving none active.
 const TAB_OF = { income: "money", expenses: "money", gigs: "calendar", clients: "outreach" };
 
+/* The bar along the bottom, as in MapleStory: your level and name, the EXP gauge
+   toward the next hero level, and this year's net income as mesos, over the
+   menu buttons. */
+function statusBarHTML() {
+  const g = gameStats();
+  const pct = g.xpIntoLevel / g.xpPerLevel * 100;
+  return '<div class="sb-exp">' +
+    '<span class="sb-lv" title="Hero level: every stat added together">Lv.' + g.level + "</span>" +
+    '<span class="sb-name">' + esc(heroName(heroOf())) + "</span>" +
+    '<span class="sb-gauge meter-xp" role="progressbar" aria-label="EXP toward level ' + (g.level + 1) +
+      '" aria-valuemin="0" aria-valuemax="' + g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '">' +
+      '<span class="meter-fill" style="width:' + pct.toFixed(2) + '%"></span>' +
+      '<span class="sb-num">EXP ' + g.xpIntoLevel + " / " + g.xpPerLevel + " [" + pct.toFixed(2) + "%]</span></span>" +
+    '<span class="sb-meso" title="Net income this year">' + money0(ytdFigures().net) + "</span></div>";
+}
+
 function renderTabbar() {
   const current = TAB_OF[state.view] || state.view;
-  $("#tabbar").innerHTML = TABS.map((t) => {
+  $("#tabbar").innerHTML = statusBarHTML() + '<div class="sb-tabs">' + TABS.map((t) => {
     const n = tabBadge(t.view);
     return '<button class="tab' + (current === t.view ? " active" : "") +
       '" data-act="goto" data-view="' + t.view + '">' +
       '<span class="tab-icon"><svg viewBox="0 0 24 24">' + (TAB_ICONS[t.view] || "") + "</svg>" +
       (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + "</span>" : "") + "</span>" +
       '<span class="tab-label">' + t.label + "</span></button>";
-  }).join("");
+  }).join("") + "</div>";
 }
 
 /* Set only while the user is deliberately changing tabs, where jumping to the top IS
@@ -1098,7 +1128,7 @@ function todoAddRow(extra) {
     '<select id="todo-prio" aria-label="Priority">' +
     ["regular", "urgent", "booked"].map((id) => {
       const p = prioById(id);
-      return '<option value="' + id + '">' + (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " XP</option>";
+      return '<option value="' + id + '">' + (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " EXP</option>";
     }).join("") + "</select>" +
     '<button class="btn btn-sm" data-act="add-todo">Add</button>' + (extra || "") + "</div>";
 }
@@ -1183,10 +1213,10 @@ function xpPill(t, sheet) {
     why = "Earned for " + s.name + (m > 1 ? ", with a " + fmtMult(m) + " streak bonus" : "");
   } else {
     const m = streakMult((sheet || statSheet())[s.id].nextStreak);
-    why = p.name + " pays " + p.xp + " XP" + (m > 1 ? ", " + fmtMult(m) + " for your " + s.name + " streak" : "");
+    why = p.name + " pays " + p.xp + " EXP" + (m > 1 ? ", " + fmtMult(m) + " for your " + s.name + " streak" : "");
   }
   return '<span class="xp-pill prio-' + p.id + (t.done ? " earned" : "") + '" title="' + esc(why) + '">' +
-    (t.done ? "\u2713 " : "+") + taskXP(t, sheet) + " XP</span>";
+    (t.done ? "\u2713 " : "+") + taskXP(t, sheet) + " EXP</span>";
 }
 
 function statChip(t) {
@@ -1278,9 +1308,9 @@ function taskForm(rec) {
     '<div class="field"><label id="lbl-stat">Stat <span class="hint">what this trains</span></label>' +
     radioChips("stat", "lbl-stat", STATS.map((x) => ({ value: x.id, label: x.icon + " " + x.name })),
       t.id ? statOf(t) : (state.addStat || "")) + "</div>" +
-    '<div class="field"><label id="lbl-prio">Priority <span class="hint">XP comes from priority, not size</span></label>' +
+    '<div class="field"><label id="lbl-prio">Priority <span class="hint">EXP comes from priority, not size</span></label>' +
     radioChips("prio", "lbl-prio", PRIORITIES.map((p) => ({ value: p.id,
-      label: (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " XP" })), prioOf(t)) +
+      label: (p.icon ? p.icon + " " : "") + p.name + " \u00b7 " + p.xp + " EXP" })), prioOf(t)) +
     '<p class="field-note">' + PRIORITIES.map((p) => "<strong>" + p.name + ":</strong> " + esc(p.hint.toLowerCase()))
       .join(" \u00b7 ") + "</p></div>" +
     '<div class="field"><label>Notes <span class="hint">the detail you\u2019d otherwise forget</span></label>' +
@@ -1505,7 +1535,7 @@ function playReward(t, before, after, at, sheetBefore, drops) {
     f.className = "xp-float";
     f.setAttribute("aria-hidden", "true");
     f.style.setProperty("--stat", s.color);
-    f.textContent = "+" + xp + " " + s.name + " XP";
+    f.textContent = "+" + xp + " " + s.name + " EXP";
     f.style.left = (r.left + r.width / 2) + "px";
     f.style.top = r.top + "px";
     document.body.appendChild(f);
@@ -1514,6 +1544,18 @@ function playReward(t, before, after, at, sheetBefore, drops) {
   const pill = $(".hud-xp");
   if (pill) pill.classList.add("bump");
   playStrike(xp);
+  sysMsg("You have gained experience (+" + xp + ")", "exp");
+
+  // The hero's EXP gauge in the status bar fills from where it was.
+  const gauge = $(".sb-gauge .meter-fill");
+  if (gauge) {
+    const to = gauge.style.width;
+    gauge.style.transition = "none";
+    gauge.style.width = (after.level > before.level ? 0 : before.xpIntoLevel / before.xpPerLevel * 100) + "%";
+    void gauge.offsetWidth;
+    gauge.style.transition = "";
+    gauge.style.width = to;
+  }
 
   const b = sheetBefore[s.id], a = statSheet()[s.id];
   const statUp = a.level > b.level;
@@ -1534,13 +1576,36 @@ function playReward(t, before, after, at, sheetBefore, drops) {
       if (flame) flame.classList.add("bump");
     }
   }
+  if (a.streak > b.streak && a.streak > 1) {
+    sysMsg(s.name + " streak: " + a.streak + " days. EXP " + fmtMult(streakMult(a.streak)) + ".", "info");
+  }
 
   if (statUp) {
-    celebrate({ kicker: s.name + " level up!", big: "Level " + a.level, statColor: s.color,
+    sysMsg("Your " + s.name + " has reached Level " + a.level + ".", "info");
+    celebrate({ kicker: s.name + " up!", big: "Lv." + a.level, statColor: s.color,
                 art: '<span class="drop-art stat-art" aria-hidden="true">' + s.icon + "</span>" });
   }
   if (after.level > before.level) celebrateLevel(after.level);
   (drops || []).forEach(celebrateDrop);
+}
+
+/* The corner log, as in MapleStory: "You have gained experience (+40)". Lines
+   fade after a few seconds; the newest five stay. */
+function sysMsg(text, kind) {
+  let box = document.getElementById("sysmsg");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "sysmsg";
+    box.setAttribute("aria-live", "polite");
+    document.body.appendChild(box);
+  }
+  const line = document.createElement("p");
+  line.className = "sysmsg-line" + (kind ? " " + kind : "");
+  line.textContent = text;
+  box.appendChild(line);
+  while (box.children.length > 5) box.removeChild(box.firstChild);
+  setTimeout(() => line.classList.add("fade"), 6000);
+  setTimeout(() => line.remove(), 6800);
 }
 
 /* Celebrations queue, so a level-up and a loot drop never land on top of each
@@ -1559,7 +1624,7 @@ function nextCelebration() {
   box.className = "levelup" + (c.stay ? " stay" : "");
   box.setAttribute("role", c.stay ? "dialog" : "status");
   if (c.stay) box.setAttribute("aria-label", c.kicker);
-  box.innerHTML = '<div class="levelup-card on-yellow' + (c.drop ? " drop" : "") + '"' +
+  box.innerHTML = '<div class="levelup-card on-yellow' + (c.drop ? " drop rar-" + c.rarity : "") + '"' +
     (c.statColor ? ' style="--stat:' + c.statColor + '"' : "") + ">" +
     '<div class="levelup-burst" aria-hidden="true">' +
     Array.from({ length: 12 }, (_, i) => '<i style="--a:' + (i * 30) + 'deg"></i>').join("") + "</div>" +
@@ -1586,7 +1651,8 @@ function nextCelebration() {
 }
 
 function celebrateLevel(level) {
-  celebrate({ kicker: "Hero level up!", big: "Level " + level });
+  sysMsg("Congratulations! You have reached Level " + level + ".", "info");
+  celebrate({ kicker: "Level up!", big: "Lv." + level });
 }
 
 // A loot drop: what it is, how rare, and a button to wear it straight away.
@@ -1595,12 +1661,13 @@ function celebrateDrop(d) {
   const wearable = it.kind === "title" || it.kind === "bar" || it.kind === "backdrop";
   const kicker = it.kind === "badge" ? "Streak milestone!"
     : it.kind === "chest" ? "Treasure chest!" : "Loot drop!";
+  sysMsg("You have acquired " + it.name + ".", "item");
   const sub = '<p class="drop-tags"><span class="tag tag-' + it.rarity + '">' + RARITY[it.rarity].name + "</span>" +
     '<span class="tag">' + LOOT_KINDS[it.kind] + "</span>" +
     (d.again ? '<span class="tag">Earned again</span>' : "") + "</p>" +
-    (it.kind === "chest" ? '<p class="drop-note">You\u2019ve found everything, so bonus rolls pay XP now.</p>' : "");
+    (it.kind === "chest" ? '<p class="drop-note">You\u2019ve found everything, so bonus rolls pay EXP now.</p>' : "");
   celebrate({
-    stay: true, drop: true, kicker: kicker, big: it.name, art: lootArt(it), sub: sub,
+    stay: true, drop: true, rarity: it.rarity, kicker: kicker, big: it.name, art: lootArt(it), sub: sub,
     statColor: it.stat ? statById(it.stat).color : "",
     actions: '<div class="drop-actions">' +
       (wearable ? '<button class="btn btn-primary" data-act="loot-equip" data-kind="' + it.kind +
@@ -1891,16 +1958,107 @@ function nudges() {
 
 /* ============================================================
    HERO & BATTLE
-   A pixel hero on the Today screen fights a slime whose health is today's quests.
-   Every quest finished is a hit, worth the quest's XP; finish them all and the
-   slime is beaten. The sprites are drawn as SVG rects from the little maps below,
-   one character per pixel, so they stay sharp at any size.
+   A pixel hero on the Today screen fights a monster whose HP is today's quests,
+   MapleStory style. Every quest finished is a hit, worth the quest's XP; finish
+   them all and the monster drops its mesos. The sprites are drawn as SVG rects
+   from the little maps below, one character per pixel, so they stay sharp at any
+   size. All of them are drawn for this app; none is taken from the game.
    ============================================================ */
 
-/* Slime colours. Left on "changes daily", each day brings a different one. */
-const SLIMES = [["Green", "#5BD46A"], ["Blue", "#4FB3FF"], ["Pink", "#FF7AB6"],
-                ["Purple", "#B07BFF"], ["Orange", "#FFB347"], ["Red", "#FF5A4E"],
-                ["Gold", "#FFD23F"], ["Teal", "#2EC4B6"]];
+/* The monsters, one map each. K outline, E eyes (drawn on their own layer so
+   they can close), m mouth; the other letters are each monster's colours. */
+const MOB_SPRITES = {
+  snail: [
+    ".........KKKK...",
+    ".......KKSSSSKK.",
+    "..K..K.KSSsssSSK",
+    "..K..K.KSsSSSsSK",
+    ".KKKKKKKSsSssSSK",
+    ".KBBBBBKSSsSSsSK",
+    ".KBEBEBKKSSssSK.",
+    ".KBBBBBBKKSSKK..",
+    "KBBBBBBBBBKKBBK.",
+    "KbbbbbbbbbbbbbK.",
+    ".KKKKKKKKKKKKK.."],
+  mushroom: [
+    "....KKKKKK....",
+    "..KKOOOOOOKK..",
+    ".KOOwwOOOOOOK.",
+    ".KOwwOOOOOdOK.",
+    "KOOOOOOOOddOOK",
+    "KOdOOOOOOOOOOK",
+    "KooooooooooooK",
+    "..KKTTTTTTKK..",
+    "...KTETTETK...",
+    "...KTETTETK...",
+    "...KTTmmTTK...",
+    "...KTTTTTTK...",
+    "..KKKK..KKKK.."],
+  stump: [
+    ".....LL.......",
+    "....LlL.......",
+    "...KKKKKKKK...",
+    "..KTTTTTTTTK..",
+    "..KTtttttTTK..",
+    "..KKKKKKKKKK..",
+    "..KWWWWWWWWK..",
+    "..KWEWWWWEWK..",
+    "..KWEWWWWEWK..",
+    "..KWWWmmWWWK..",
+    "..KwWWWWWWwK..",
+    ".KWWKWWWWKWWK.",
+    ".KKK.KKKK.KKK."],
+  pig: [
+    "..KK......KK..",
+    ".KPpK....KpPK.",
+    ".KPPPKKKKPPPK.",
+    "KPPPPPPPPPPPPK",
+    "KPPEPPPPPPEPPK",
+    "KPPEPPPPPPEPPK",
+    "KPPPPKnnKPPPPK",
+    "KPpPPKnnKPPpPK",
+    "KPPPPPKKPPPPPK",
+    ".KPPPPPPPPPPK.",
+    ".KPPK....KPPK.",
+    ".KKKK....KKKK."],
+  slime: [
+    "......LL......",
+    ".....KlLK.....",
+    "...KKGGGGKK...",
+    "..KGGwGGGGGK..",
+    ".KGwwGGGGGGGK.",
+    ".KGGEGGGGEGGK.",
+    "KGGGEGGGGEGGGK",
+    "KGGGGGmmGGGGGK",
+    "KgGGGGGGGGGGgK",
+    ".KggggggggggK.",
+    "..KKKKKKKKKK.."],
+};
+
+const MOB_COLOURS = {
+  K: "#2B1D12", m: "#5A2614", w: "#FFFFFF",
+  B: "#F2D7A6", b: "#C9A877",
+  T: "#FFE4B5", t: "#B98A4E",
+  L: "#5BC24A", l: "#2F8A2C",
+  W: "#8A5A30",
+  P: "#FFB8CB", p: "#FF86A6", n: "#F07A9C",
+};
+
+/* The monsters you can meet, weakest first. `face` is the colour under the eyes,
+   so closed eyes leave skin behind rather than a hole. Left on "changes daily",
+   each day brings a different one. */
+const MOBS = [
+  { name: "Snail", sprite: "snail", level: 1, face: "B", pal: { S: "#7BCB4F", s: "#438F2A" } },
+  { name: "Blue Snail", sprite: "snail", level: 2, face: "B", pal: { S: "#5AA8FF", s: "#2F66C9" } },
+  { name: "Red Snail", sprite: "snail", level: 4, face: "B", pal: { S: "#FF6A55", s: "#B9352A" } },
+  { name: "Slime", sprite: "slime", level: 6, face: "G", pal: { G: "#5FD6B0", g: "#2F9C7E" } },
+  { name: "Pig", sprite: "pig", level: 7, face: "P", pal: {} },
+  { name: "Orange Mushroom", sprite: "mushroom", level: 8, face: "T",
+    pal: { O: "#FF9A2E", o: "#C95E10", d: "#E9751A", w: "#FFD9A6" } },
+  { name: "Stump", sprite: "stump", level: 9, face: "W", pal: { w: "#6A4222" } },
+  { name: "Blue Mushroom", sprite: "mushroom", level: 11, face: "T",
+    pal: { O: "#5FA4FF", o: "#2C62C4", d: "#447FE0", w: "#D6E8FF" } },
+];
 
 const HERO_OPTIONS = {
   skin: [["Porcelain", "#FFE3CC"], ["Peach", "#F2C291"], ["Tan", "#D99B6C"],
@@ -1912,7 +2070,7 @@ const HERO_OPTIONS = {
   outfit: [["Blue", "#2F4BFF"], ["Red", "#E5484D"], ["Green", "#2BB673"],
            ["Purple", "#7A4DFF"], ["Orange", "#FF9F1C"], ["Slate", "#4A5080"]],
   weapon: [["Sword", "sword"], ["Axe", "axe"], ["Staff", "staff"], ["Hammer", "hammer"]],
-  slime: [["Changes daily", "daily"]].concat(SLIMES),
+  slime: [["Changes daily", "daily"]].concat(MOBS.map((m) => [m.name, m.sprite])),
 };
 
 const HERO_DEFAULT = { name: "", skin: 1, hairColor: 1, hairStyle: "short", hat: "none",
@@ -2067,12 +2225,14 @@ function heroWeaponSVG(h) {
     pixelRects(w.rows, heroPalette(h), 12 - w.gx, 9 - w.gy) + "</g>";
 }
 
-// Hero and slime side by side, for the customiser.
+// Hero and monster side by side, for the customiser.
 function matchupPreview(h) {
-  return '<svg class="hero-portrait" viewBox="-2 -7 40 25" shape-rendering="crispEdges" role="img" aria-label="' +
-    esc(heroName(h)) + " and the " + esc(slimeFor(h, todayISO())[0]) + ' slime">' +
-    heroBodySVG(h) + heroWeaponSVG(h) + '<g transform="translate(21 7)">' +
-    slimeSVG(slimeFor(h, todayISO())[1]) + "</g></svg>";
+  const mob = mobFor(h, todayISO());
+  const rows = MOB_SPRITES[mob.sprite];
+  return '<svg class="hero-portrait" viewBox="-2 -7 42 25" shape-rendering="crispEdges" role="img" aria-label="' +
+    esc(heroName(h)) + " and a " + esc(mob.name) + '">' +
+    heroBodySVG(h) + heroWeaponSVG(h) + '<g transform="translate(' + (38 - rows[0].length) + " " +
+    (17 - rows.length) + ')">' + mobSVG(mob) + "</g></svg>";
 }
 
 // The hero on their own, for the Personal tab.
@@ -2081,36 +2241,35 @@ function heroPortrait(h) {
     esc(heroName(h)) + ', your hero">' + heroBodySVG(h) + heroWeaponSVG(h) + "</svg>";
 }
 
-const SLIME_ROWS = [
-  ".....KKKK.....",
-  "...KKGGGGKK...",
-  "..KGGwGGGGGK..",
-  ".KGwwGGGGGGGK.",
-  ".KGGGGGGGGGGK.",
-  "KGGGGGGGGGGGGK",
-  "KGGGGGGGGGGGGK",
-  "KgGGGGGGGGGGgK",
-  ".KggggggggggK.",
-  "..KKKKKKKKKK.."];
-
-function slimeOfDay(iso) {
+function mobOfDay(iso) {
   const n = iso.split("-").reduce((s, v) => s + Number(v), 0);
-  return SLIMES.slice(0, 5)[n % 5];
+  return MOBS[n % MOBS.length];
 }
 
-// The slime you picked, or today's if you left it to chance (option 0).
-function slimeFor(h, iso) {
-  return SLIMES[num(h.slime) - 1] || slimeOfDay(iso);
+// The monster you picked, or today's if you left it to chance (option 0).
+function mobFor(h, iso) {
+  return MOBS[num(h.slime) - 1] || mobOfDay(iso);
 }
 
-function slimeSVG(color) {
-  const pal = { K: "#14142B", G: color, g: shade(color, 0.22), w: "#FFFFFF" };
-  return pixelRects(SLIME_ROWS, pal, 0, 0) +
-    '<g class="slime-eyes"><rect x="4" y="4" width="1" height="2" fill="#14142B"/>' +
-    '<rect x="8" y="4" width="1" height="2" fill="#14142B"/>' +
-    '<rect x="5" y="6" width="2" height="1" fill="#14142B"/></g>' +
-    '<g class="slime-shut"><rect x="3" y="5" width="2" height="1" fill="#14142B"/>' +
-    '<rect x="7" y="5" width="2" height="1" fill="#14142B"/></g>';
+/* One monster. Its eyes sit on their own layer: open, or shut to a single pixel
+   when there's nothing to fight. */
+function mobSVG(mob) {
+  const rows = MOB_SPRITES[mob.sprite];
+  const pal = Object.assign({}, MOB_COLOURS, mob.pal);
+  pal.E = pal[mob.face];
+  const bottom = {};
+  let open = "";
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== "E") continue;
+      open += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="' + MOB_COLOURS.K + '"/>';
+      bottom[x] = y;
+    }
+  });
+  const shut = Object.keys(bottom).map((x) =>
+    '<rect x="' + x + '" y="' + bottom[x] + '" width="1" height="1" fill="' + MOB_COLOURS.K + '"/>').join("");
+  return pixelRects(rows, pal, 0, 0) + '<g class="mob-eyes">' + open + "</g>" +
+    '<g class="mob-shut">' + shut + "</g>";
 }
 
 /* Today's quests, worked out once and shared by the quest list and the battle:
@@ -2130,7 +2289,7 @@ function todaysQuests() {
   return { picked, doneToday, fallback, quests, total: quests.length + doneToday.length };
 }
 
-// The slime's health is the XP still on the table today.
+// The monster's HP is the XP still on the table today.
 function battleState(q) {
   const sheet = statSheet();
   const maxHP = q.quests.concat(q.doneToday).reduce((s, t) => s + taskXP(t, sheet), 0);
@@ -2138,36 +2297,63 @@ function battleState(q) {
   return { maxHP, hp, won: maxHP > 0 && hp === 0, asleep: maxHP === 0 };
 }
 
+/* The stage is drawn on a 64 x 30 grid (y from -7): ground from y = 17. The
+   name tags, the monster's HP bar, damage and the meso drop are HTML laid over
+   it, placed by percentages of that grid so they follow it at any size. */
+const STAGE = { w: 64, top: -7, h: 30, ground: 17 };
+const stageX = (x) => (x / STAGE.w * 100).toFixed(1) + "%";
+const stageY = (y) => ((y - STAGE.top) / STAGE.h * 100).toFixed(1) + "%";
+
 function battleCard(q, level) {
   const h = heroOf();
   const b = battleState(q);
-  const [slimeName, slimeColor] = slimeFor(h, todayISO());
+  const mob = mobFor(h, todayISO());
+  const rows = MOB_SPRITES[mob.sprite];
+  const mw = rows[0].length, mh = rows.length;
+  const mx = STAGE.w - 5 - mw, my = STAGE.ground - mh, mc = mx + mw / 2;
   const pct = b.maxHP ? Math.round(b.hp / b.maxHP * 100) : 0;
+  const title = heroTitle();
   const caption = b.asleep
-    ? "The slime is asleep. Pick a quest and it wakes up."
-    : b.won ? "Slime defeated! Every quest is done today."
-    : "Finish a quest to strike. Each hit does its XP in damage.";
+    ? "The " + mob.name + " is asleep. Pick a quest and it wakes up."
+    : b.won ? "The " + mob.name + " is down and dropped its mesos. Every quest is done today."
+    : "Finish a quest to strike. Each hit does its EXP in damage.";
   return '<section class="card battle' + (b.won ? " won" : "") + (b.asleep ? " asleep" : "") + '" id="battle">' +
     '<div class="battle-stage">' +
-    '<svg class="battle-svg" viewBox="0 -7 64 27" shape-rendering="crispEdges" aria-hidden="true">' +
-    '<rect class="ground-line" x="0" y="17" width="64" height="1"/>' +
-    '<rect class="ground" x="0" y="18" width="64" height="3"/>' +
+    '<svg class="battle-svg" viewBox="0 ' + STAGE.top + " " + STAGE.w + " " + STAGE.h +
+      '" shape-rendering="crispEdges" aria-hidden="true">' +
+    '<rect class="ground" x="0" y="' + STAGE.ground + '" width="64" height="7"/>' +
+    '<rect class="ground-grass" x="0" y="' + STAGE.ground + '" width="64" height="1"/>' +
+    '<rect class="ground-edge" x="0" y="' + (STAGE.ground + 1) + '" width="64" height="1"/>' +
+    [[5, 20], [17, 21], [30, 19], [41, 21], [55, 20]].map((p) =>
+      '<rect class="ground-speck" x="' + p[0] + '" y="' + p[1] + '" width="2" height="1"/>').join("") +
     '<g transform="translate(6 0)"><g class="hero-anim">' + heroBodySVG(h) + heroWeaponSVG(h) + "</g></g>" +
-    '<g transform="translate(43 7)"><g class="slime-anim">' + slimeSVG(slimeColor) + "</g></g>" +
+    '<g transform="translate(' + mx + " " + my + ')"><g class="mob-anim">' + mobSVG(mob) + "</g></g>" +
     "</svg>" +
-    '<div class="dmg" aria-hidden="true"></div>' +
-    '<div class="zzz" aria-hidden="true">z<span>z</span><span>Z</span></div>' +
-    '<div class="victory" aria-hidden="true">Victory!</div>' +
+    (b.asleep ? "" : '<div class="mob-hp" aria-hidden="true" style="left:' + stageX(mx + 1) + ";width:" +
+      stageX(mw - 2) + ";top:" + stageY(my - 3) + '"><i style="width:' + pct + '%"></i></div>') +
+    '<div class="nametag" aria-hidden="true" style="left:' + stageX(13) + ";top:" + stageY(STAGE.ground + 1.5) + '">' +
+      esc(heroName(h)) + "</div>" +
+    (title ? '<div class="nametag medal-tag" aria-hidden="true" style="left:' + stageX(13) + ";top:" +
+      stageY(STAGE.ground + 4) + '">' + esc(title) + "</div>" : "") +
+    '<div class="nametag mob-tag" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(STAGE.ground + 1.5) + '">' +
+      "Lv." + mob.level + " " + esc(mob.name) + "</div>" +
+    '<div class="dmg" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(my - 6) + '"></div>' +
+    '<div class="zzz" aria-hidden="true" style="left:' + stageX(mx + mw - 2) + ";top:" + stageY(my - 6) + '">z<span>z</span><span>Z</span></div>' +
+    '<div class="drops" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(STAGE.ground - 2) + '">' +
+      "<i></i><i></i><i></i></div>" +
+    '<div class="victory" aria-hidden="true">Clear!</div>' +
     "</div>" +
     '<div class="battle-info">' +
     '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong>" +
-    (heroTitle() ? ' <span class="title-tag">' + esc(heroTitle()) + "</span>" : "") +
-    ' <span class="lv">Lv ' + level + "</span>" +
-    ' <span class="vs">vs</span> <strong>' + slimeName + " Slime</strong></p>" +
+    ' <span class="lv">Lv.' + level + "</span>" +
+    ' <span class="vs">vs</span> <strong>' + esc(mob.name) + "</strong></p>" +
     (b.asleep ? "" :
-      '<div class="meter meter-hp" role="progressbar" aria-label="Slime health" aria-valuemin="0" aria-valuemax="' +
-      b.maxHP + '" aria-valuenow="' + b.hp + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
-      '<p class="battle-hp"><strong>' + b.hp + " / " + b.maxHP + "</strong> HP</p>") +
+      '<div class="meter meter-hp" role="progressbar" aria-label="' + esc(mob.name) + ' HP" aria-valuemin="0" aria-valuemax="' +
+      b.maxHP + '" aria-valuenow="' + b.hp + '"><div class="meter-fill" style="width:' + pct + '%"></div></div>') +
+    '<table class="mob-table"><tbody>' +
+    "<tr><th>Level</th><td>" + mob.level + "</td><th>HP</th><td>" + (b.asleep ? "\u2013" : b.hp + " / " + b.maxHP) + "</td></tr>" +
+    "<tr><th>EXP</th><td>" + (b.asleep ? "\u2013" : b.maxHP) + "</td><th>Drops</th><td>Mesos, " +
+      Math.round(LOOT_CHANCE * 100) + "% loot</td></tr></tbody></table>" +
     '<p class="battle-caption" role="status">' + caption + "</p>" +
     '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button>' +
     "</div></section>";
@@ -2196,10 +2382,12 @@ function playStrike(xp) {
 function heroEditor() {
   state.heroDraft = heroOf();
   const h = state.heroDraft;
-  const group = (key, label, swatch) =>
+  // mode: "swatch" for colours, "index" for a plain list stored by position.
+  const group = (key, label, mode) =>
     '<div class="field"><label>' + label + '</label><div class="opts" role="group" aria-label="' + label + '">' +
     HERO_OPTIONS[key].map((o, i) => {
-      const val = swatch ? i : o[1];
+      const swatch = mode === "swatch";
+      const val = mode ? i : o[1];
       return '<button type="button" class="opt" data-act="hero-opt" data-key="' + key + '" data-val="' + val +
         '" aria-pressed="' + (h[key] === val) + '">' +
         (swatch ? '<span class="swatch-dot' + (o[1] === "daily" ? " swatch-daily" : "") + '"' +
@@ -2211,8 +2399,8 @@ function heroEditor() {
     '<div class="field"><label>Name <span class="hint">leave blank to use your first name</span></label>' +
     '<input name="name" maxlength="24" value="' + esc(h.name) + '" placeholder="' + esc(firstName() || "Hero") + '"></div>' +
     group("weapon", "Weapon") + group("hat", "Headgear") + group("hairStyle", "Hair") +
-    group("hairColor", "Hair colour", true) + group("skin", "Skin tone", true) + group("outfit", "Outfit", true) +
-    '<h3 class="editor-sub">Your rival</h3>' + group("slime", "Slime colour", true) +
+    group("hairColor", "Hair colour", "swatch") + group("skin", "Skin tone", "swatch") + group("outfit", "Outfit", "swatch") +
+    '<h3 class="editor-sub">Your rival</h3>' + group("slime", "Monster", "index") +
     "</form>",
     '<button class="btn" data-act="close-modal">Cancel</button>' +
     '<button class="btn btn-primary" data-act="hero-save">Save hero</button>',
@@ -2289,7 +2477,7 @@ const PLAYBOOK = [
     quest: "Set up a launch pad by the door for shoot gear" },
   { id: "instant-reward", tag: "Motivation", icon: "🍬", evidence: "good",
     title: "Make rewards instant",
-    what: "A reward next month barely registers. Give yourself something small right after finishing: a coffee, a song, five minutes of something fun. (It’s why this tracker pops XP the moment you tick something off.)",
+    what: "A reward next month barely registers. Give yourself something small right after finishing: a coffee, a song, five minutes of something fun. (It’s why this tracker pops EXP the moment you tick something off.)",
     why: "Research consistently finds people with ADHD favour small immediate rewards over bigger delayed ones, and that rewards boost their performance. Most of it was done with children.",
     src: ["Luman et al., Clin Psych Review 2005", "https://www.sciencedirect.com/science/article/abs/pii/S0272735804001527"],
     quest: "Choose a small reward for finishing today’s first quest" },
@@ -2361,6 +2549,16 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "The MapleStory makeover",
+    asked: "Study a MapleStory fan database site and make the tracker a gamified MapleStory version of itself.",
+    changed: [
+      "Every tab looks like the game now: cream windows with blue title bars, orange buttons, and a town map behind everything. You start in Henesys.",
+      "The bar along the bottom is the game’s status bar: your level and name, the yellow EXP gauge, and this year’s net income as mesos, above the menu buttons.",
+      "Today’s battle is a hunting ground. You fight snails, slimes, a pig, mushrooms and a stump, each with a name tag and an HP bar over its head. Hits pop orange damage numbers, and clearing the day drops mesos.",
+      "A gold “LEVEL UP!”, loot shown as item tooltips, and the corner log: “You have gained experience (+40)”.",
+      "Loot uses the game’s terms: titles are medals, and backdrops are maps to travel to (Ellinia, Kerning City, Perion, Lith Harbor, Ludibrium, Orbis). Any you’d already found became maps.",
+      "XP is called EXP everywhere. The look stays bright and daytime, like the game, even when your phone is in dark mode.",
+    ] },
   { date: "2026-10-01", title: "Five stats, streak multipliers and loot",
     asked: "Five separate stats, each with its own level, XP bar and streak: Hustle for reselling, Craft for photo and video, Empire for digital products, Vitality for health and personal tasks, Mind for learning and admin. XP by priority rather than size, a streak multiplier per stat with no cap, and light loot drops.",
     changed: [
@@ -2443,12 +2641,12 @@ function statRow(s, o, owned) {
   return '<details class="card stat-row" style="--stat:' + s.color + '">' +
     '<summary class="stat-tile">' +
     '<span class="stat-icon" aria-hidden="true">' + s.icon + "</span>" +
-    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv ' + o.level + "</span></span>" +
+    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv.' + o.level + "</span></span>" +
     statMeter(s, o) + '<span class="stat-foot">' + streakTag(s, o) + "</span></summary>" +
     '<div class="stat-detail"><p class="stat-what">' + esc(s.what) + "</p>" +
     '<dl class="stat-facts">' +
-    statFact("Next level", (o.need - o.into) + " XP to Level " + (o.level + 1)) +
-    statFact("Total", o.xp.toLocaleString() + " XP") +
+    statFact("Next level", (o.need - o.into) + " EXP to Lv." + (o.level + 1)) +
+    statFact("Total", o.xp.toLocaleString() + " EXP") +
     statFact("Streak", (o.streak ? o.streak + (o.streak === 1 ? " day" : " days") +
       (o.today ? "" : ", finish one today to keep it") : "None yet") +
       (o.best ? " \u00b7 best " + o.best : "")) +
@@ -2463,8 +2661,8 @@ function statRow(s, o, owned) {
 }
 
 function howXPHTML() {
-  return '<details class="card how-xp"><summary>How XP works</summary><div class="how-body">' +
-    "<p><strong>Priority sets the XP,</strong> not how big a task is: " +
+  return '<details class="card how-xp"><summary>How EXP works</summary><div class="how-body">' +
+    "<p><strong>Priority sets the EXP,</strong> not how big a task is: " +
     PRIORITIES.map((p) => p.name + " " + p.xp).join(" \u00b7 ") +
     ". Urgent pays the most because it\u2019s the one worth doing first.</p>" +
     "<p><strong>Streaks multiply it.</strong> Each stat keeps its own streak: finish a task in it on days in a row. " +
@@ -2472,8 +2670,8 @@ function howXPHTML() {
     [1, 2, 4, 8, 16, 32, 64].map((d) => fmtMult(streakMult(d)) + " on day " + d).join(", ") +
     ", and it keeps going.</p>" +
     "<p><strong>Loot.</strong> A streak of " + STREAK_MILESTONES.join(", ") +
-    " days always drops a badge, and 30, 100 and 365 add a title. Every finished task also has a " +
-    Math.round(LOOT_CHANCE * 100) + "% chance of a bonus: a title, a bar skin or a backdrop.</p>" +
+    " days always drops a badge, and 30, 100 and 365 add a medal. Every finished task also has a " +
+    Math.round(LOOT_CHANCE * 100) + "% chance of a bonus: a medal, a gauge skin or a new map.</p>" +
     "</div></details>";
 }
 
@@ -2511,9 +2709,9 @@ function lootHTML() {
   };
   const recent = (l.recent || []).slice(0, 5).map((r) => lootItem(r.id)).filter(Boolean);
   return '<h2 class="section-head">Loot <span class="count">' + found + " / " + LOOT.length + "</span></h2>" +
-    '<p class="page-lede">Bonus drops from finished tasks. Tap one you\u2019ve found to wear it.</p>' +
+    '<p class="page-lede">Bonus drops from finished quests. Tap one you\u2019ve found to equip it.</p>' +
     '<section class="card loot-card">' +
-    group("title", "Title", "No title") + group("bar", "Bar skin", "Classic") + group("backdrop", "Backdrop", "Plain") +
+    group("title", "Medal", "No medal") + group("bar", "Gauge skin", "Classic") + group("backdrop", "Map", "Henesys") +
     (recent.length ? '<p class="loot-recent"><strong>Recent:</strong> ' +
       recent.map((it) => esc(it.name)).join(" \u00b7 ") + "</p>" : "") +
     "</section>";
@@ -2532,7 +2730,7 @@ VIEWS.personal = function () {
   html += '<section class="card hero-card">' + heroPortrait(h) +
     '<div class="hero-card-text"><h1>' + esc(heroName(h)) + "</h1>" +
     (title ? '<p class="hero-title"><span class="title-tag">' + esc(title) + "</span></p>" : "") +
-    '<p>Level ' + g.level + " · " + g.totalXP.toLocaleString() + " XP · " +
+    '<p>Lv.' + g.level + " · " + g.totalXP.toLocaleString() + " EXP · " +
       (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
     '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button></div></section>';
 
@@ -2586,7 +2784,7 @@ function statMeter(s, o) {
   const pct = Math.min(100, Math.round(o.into / o.need * 100));
   // Spans, so the bar can sit inside a <summary> too.
   return '<span class="meter meter-xp meter-stat" role="progressbar" aria-label="' + s.name +
-    " XP toward level " + (o.level + 1) + '" aria-valuemin="0" aria-valuemax="' + o.need +
+    " EXP toward level " + (o.level + 1) + '" aria-valuemin="0" aria-valuemax="' + o.need +
     '" aria-valuenow="' + o.into + '"><span class="meter-fill" style="width:' + pct + '%"></span></span>';
 }
 
@@ -2594,7 +2792,7 @@ function statMeter(s, o) {
 function statTile(s, o) {
   return '<div class="stat-tile" data-stat="' + s.id + '" style="--stat:' + s.color + '">' +
     '<span class="stat-icon" aria-hidden="true">' + s.icon + "</span>" +
-    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv ' + o.level + "</span></span>" +
+    '<span class="stat-label"><span class="stat-name">' + s.name + '</span><span class="stat-lv">Lv.' + o.level + "</span></span>" +
     statMeter(s, o) +
     '<span class="stat-foot">' + streakTag(s, o) +
     '<span class="stat-mult" title="Multiplier on your next ' + s.name + ' task">' + fmtMult(streakMult(o.nextStreak)) + "</span>" +
@@ -2605,7 +2803,7 @@ function statsPanel(sheet, g) {
   return '<section class="card stats-panel" aria-labelledby="stats-h">' +
     '<div class="stats-head"><h2 id="stats-h">Your stats</h2>' +
     '<a href="#" class="stats-hero" data-act="goto" data-view="personal" title="Hero level: every stat added together">' +
-    "Hero Lv " + g.level + " \u00b7 " + g.xpIntoLevel + " / " + g.xpPerLevel + " XP \u203a</a></div>" +
+    "Hero Lv." + g.level + " \u00b7 " + g.xpIntoLevel + " / " + g.xpPerLevel + " EXP \u203a</a></div>" +
     '<div class="stat-tiles">' + STATS.map((s) => statTile(s, sheet[s.id])).join("") + "</div></section>";
 }
 
@@ -2626,7 +2824,7 @@ VIEWS.today = function () {
   const q = todaysQuests();
   const { picked, doneToday, fallback, quests, total } = q;
 
-  /* ---- the battle: today's quests are the slime's health ---- */
+  /* ---- the battle: today's quests are the monster's HP ---- */
   html += battleCard(q, g.level);
 
   html += '<div class="play-cols"><div class="play-main">';
@@ -2646,7 +2844,7 @@ VIEWS.today = function () {
   }
 
   /* Finished quests leave the list straight away and go to Completed below; the
-     counter and the slime keep score. */
+     counter and the monster keep score. */
   if (!quests.length && doneToday.length) {
     html += '<p class="quests-clear">\ud83c\udf89 All of today\u2019s quests are done. Nice work.</p>';
   }

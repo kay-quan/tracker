@@ -100,8 +100,8 @@ let app = read("app.js").replace(
   "  gigPaid, gigOwed, gigIsPaid, moneyByMonth, owedTotals, toggleGigPaid, gigValue,\n" +
   "  savePersonal, personalById, PERSONAL_KINDS, ytdFigures, workGigs,\n" +
   "  personalDays, spanLabel, gameStats, streakFrom, bankXP, taskXP, XP_PER_LEVEL, isoOf,\n" +
-  "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, slimeOfDay,\n" +
-  "  slimeFor, SLIMES, VIEWS, CHANGELOG, assignTop,\n" +
+  "  battleState, todaysQuests, heroOf, HERO_OPTIONS, PLAYBOOK, EVIDENCE, mobOfDay,\n" +
+  "  mobFor, MOBS, MOB_SPRITES, mobSVG, VIEWS, CHANGELOG, assignTop,\n" +
   "  STATS, PRIORITIES, statSheet, streakMult, statLevel, guessStat, statOf, prioOf, earnedXP,\n" +
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
   "  heroTitle, addDays,\n" +
@@ -1033,8 +1033,21 @@ t("a hero with nothing saved gets the defaults, and saved picks survive", () => 
   if (!T.HERO_OPTIONS.outfit[h.outfit]) throw new Error("outfit index out of range");
 });
 
-t("the slime of the day is stable for a given date", () => {
-  eq(T.slimeOfDay("2026-10-01")[0], T.slimeOfDay("2026-10-01")[0]);
+t("the monster of the day is stable for a given date", () => {
+  eq(T.mobOfDay("2026-10-01").name, T.mobOfDay("2026-10-01").name);
+});
+
+t("every monster sprite is a clean rectangle with eyes, and every monster has one", () => {
+  Object.keys(T.MOB_SPRITES).forEach((k) => {
+    const rows = T.MOB_SPRITES[k];
+    rows.forEach((r, i) => { if (r.length !== rows[0].length) throw new Error(k + " row " + i + " is the wrong width"); });
+    if (rows.join("").indexOf("E") < 0) throw new Error(k + " has no eyes");
+  });
+  T.MOBS.forEach((m) => {
+    if (!T.MOB_SPRITES[m.sprite]) throw new Error(m.name + " has no sprite");
+    if (T.mobSVG(m).indexOf("undefined") >= 0) throw new Error(m.name + " uses a colour it doesn't define");
+  });
+  eq(T.HERO_OPTIONS.slime.length, T.MOBS.length + 1, "every monster can be picked, plus 'changes daily'");
 });
 
 t("every playbook tip has a real source link, an evidence rating and a quest", () => {
@@ -1048,10 +1061,10 @@ t("every playbook tip has a real source link, an evidence rating and a quest", (
   });
 });
 
-t("a picked slime colour sticks; 'changes daily' follows the date", () => {
-  eq(T.slimeFor({ slime: 3 }, "2026-10-01")[0], T.SLIMES[2][0], "option 3 is the third colour");
-  eq(T.slimeFor({ slime: 0 }, "2026-10-01")[0], T.slimeOfDay("2026-10-01")[0], "0 is daily");
-  eq(T.slimeFor({}, "2026-10-01")[0], T.slimeOfDay("2026-10-01")[0], "unset is daily");
+t("a picked monster sticks; 'changes daily' follows the date", () => {
+  eq(T.mobFor({ slime: 3 }, "2026-10-01").name, T.MOBS[2].name, "option 3 is the third monster");
+  eq(T.mobFor({ slime: 0 }, "2026-10-01").name, T.mobOfDay("2026-10-01").name, "0 is daily");
+  eq(T.mobFor({}, "2026-10-01").name, T.mobOfDay("2026-10-01").name, "unset is daily");
 });
 
 t("a quest finished today leaves the quest list but still counts", () => {
