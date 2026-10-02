@@ -4598,6 +4598,226 @@ th, .mob-table th { font-size: 14px; }
   .closet-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 }
 
+/* ---------- the phone layout ----------
+   Kevin, 2026-10-02, from a screen recording: everything stacked into one long
+   scroll, and finding anything meant scrolling past all of it. On a phone the
+   header is one line, each page shows one section at a time (the sub-tabs), and
+   lists are one-line rows. Text stays at the readable sizes above: it's the
+   repeats, the padding and the stacking that go. app.js builds the phone pages
+   (isPhone); these rules shape them. */
+
+/* Grey "muted" text on a legend's dark backing all but vanished ("Peak month"). */
+.legend .muted { color: #D5DCE4; }
+
+/* sub-tabs: the game's window tabs, on a dark plate that stays put as you scroll */
+.subtabs {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; gap: 4px;
+  margin: 0 0 12px;
+  padding: 5px;
+  background: var(--plate);
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px #B8BFC9, 0 0 0 4px #1E242C, var(--shadow-sm);
+  overflow-x: auto; scrollbar-width: none;       /* never overlap: scroll if they can't fit */
+}
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab {
+  flex: 1 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 40px; padding: 4px 6px;
+  font: 700 15px var(--font); color: #E4E9EF; white-space: nowrap;
+  background: transparent; border: 0; border-radius: 7px;
+  cursor: pointer;
+}
+.subtab.on {
+  color: #1E242C;
+  background: var(--silver);
+  box-shadow: inset 0 -2px 0 #B8BFC9, 0 0 0 1px #0E1116;
+}
+.subtab-n {
+  min-width: 20px; padding: 1px 6px;
+  font-size: 12px; font-weight: 800; line-height: 1.4; text-align: center;
+  color: #FFFFFF; background: #4A5463; border-radius: 999px;
+}
+.subtab.on .subtab-n { color: #FFD800; background: #1E242C; }
+.subtab-n.alert, .subtab.on .subtab-n.alert { color: #FFFFFF; background: #D9342B; }
+
+/* Local Events: a day too narrow for names says how many shows it has */
+.cal-count { display: block; margin-top: 3px; font: 800 16px/1 var(--font); color: #4B2FB0; text-align: center; }
+/* In the corner, so a festival never makes its week taller than the others. */
+.cal-grid.events .cal-day:has(.cal-flag) { position: relative; }
+.cal-flag { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; }
+.cal-flag.fest { background: #C2557A; }
+.cal-flag.mine { background: #B07D2B; }
+.cal-flag.fest + .cal-flag.mine { right: 15px; }
+.cal-grid.events .cal-day:has(.cal-count) { background: #F1ECFF; }
+.cal-grid.events .cal-day.open:has(.cal-count) { background: #FFF6C2; }
+.ev-search { display: flex; gap: 6px; margin: 0 0 8px; }
+.ev-search input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px;
+  font: 16px var(--font); color: var(--ink);
+  background: #FFFFFF; border: 2px solid #252B34; border-radius: 8px;
+}
+.ev-search .btn { min-width: 46px; min-height: 44px; padding: 0 10px; font-size: 20px; justify-content: center; }
+.ev-filters { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.ev-filters .chips { flex: 1; min-width: 0; flex-wrap: nowrap; gap: 4px; margin: 0; }
+.ev-filters .chip { min-height: 38px; padding: 3px 9px; font-size: 14px; white-space: nowrap; }
+.ev-filters .segmented { flex: none; }
+.ev-filters .seg { min-height: 34px; padding: 2px 11px; font-size: 18px; }
+.ev-found {
+  width: fit-content; margin: 0 0 10px; padding: 6px 12px;
+  font-size: 15px; color: #FFFFFF; background: rgba(12, 16, 26, 0.74); border-radius: 6px;
+}
+.agenda-date.is-static { cursor: default; }
+.ev-hits .agenda-date.is-static {
+  min-height: 0; padding: 6px 12px;
+  font: 800 14px var(--font); color: var(--ink-2); text-transform: none; letter-spacing: 0;
+  background: #EEF1F5; border-top: 1px solid #D5DAE1;
+}
+.ev-hits .agenda-date.is-static:first-child { border-top: 0; }
+
+/* Outreach: Email next and Follow up, one line a person */
+.nx-list { padding: 0; overflow: hidden; }
+.nx-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 14px;
+  font: inherit; color: inherit; text-align: left;
+  background: transparent; border: 0; border-bottom: 1px solid #D5DAE1; border-radius: 0;
+}
+.nx-row:last-child { border-bottom: 0; }
+button.nx-row { cursor: pointer; }
+button.nx-row:hover { background: #F4F7FA; }
+.nx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nx-name { font-weight: 800; font-size: 17px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-sub { font-size: 14px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-sub .due { color: #C0281E; }
+.nx-go { flex: none; font-size: 22px; font-weight: 800; color: var(--ink-3); }
+.nx-row .btn, .nx-row .pill { flex: none; }
+.nx-row .btn { min-height: 38px; padding: 4px 12px; font-family: var(--font); font-weight: 800; font-size: 15px; letter-spacing: 0; text-transform: none; }
+.nx-more { width: 100%; margin-top: 10px; justify-content: center; }
+
+@media (max-width: 640px) {
+  /* the header: one slim line - the page, the streak, the gear */
+  .appbar-inner { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px; }
+  .appbar-top { display: contents; }
+  .app-title { order: 1; flex: 1 1 auto; min-width: 0; font-size: 22px; line-height: 1.15;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .save-state { order: 2; }
+  .hud { order: 3; flex-wrap: nowrap; gap: 6px; }
+  .app-title { width: auto; padding-right: 0; }
+  .hud { flex: none; width: auto; }
+  .hud-xp { display: none; }
+  .hud-pill { font-size: 14px; min-height: 34px; padding: 3px 10px; }
+  .icon-btn { order: 4; position: static; flex: none; }
+  .app-meta { display: none; }
+  /* Today's header is the minimap instead: the town you're in, tap to travel. */
+  body[data-view="today"] .app-title { display: none; }
+  body[data-view="today"] .app-meta { display: block; order: 0; flex: 1 1 auto; min-width: 0; margin: 0; }
+  body[data-view="today"] .minimap { max-width: 100%; }
+
+  /* tighter, not smaller */
+  .section-head, .quest-head { margin: 16px 0 8px; }
+  .fold { margin-top: 14px; }
+  .card-pad { padding: 14px; }
+  .btn-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .btn-row.three > .btn:last-child { grid-column: auto; }
+  .btn-row.three > .btn { font-family: var(--font); font-weight: 800; font-size: 15px; letter-spacing: 0; text-transform: none; white-space: nowrap; padding: 8px 4px; }
+  .allleads > summary { margin-top: 4px; padding: 12px 14px; font-weight: 800; color: var(--ink); background: var(--silver); border-radius: 10px; box-shadow: var(--frame); }
+  .btn-row { margin-bottom: 12px; }
+  .section-head .section-action { min-height: 34px; padding: 4px 10px; font-family: var(--font); font-weight: 800;
+                                  font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .hero-rows .krow { padding-top: 8px; padding-bottom: 8px; }
+
+  /* Money's months: made, owed and projected side by side under the month */
+  .monthstrip:not(:has(> .stat)) { gap: 8px; }
+  .monthstrip .mcard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 10px; padding: 12px 14px; }
+  .monthstrip .mcard h3 { grid-column: 1 / -1; margin: 0 0 4px; font-size: 16px; }
+  .monthstrip .mline, .monthstrip .mline.total {
+    display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; border: 0;
+    font-size: 13px; color: var(--ink-3);
+  }
+  .monthstrip .mline b { font-size: 16px; }
+
+  /* Today: the fight as a strip above the quests, and quests that don't sprawl */
+  .quest, .quest.slot.filled { padding: 12px 14px; gap: 8px 12px; }
+  .quest .taskbody { flex-basis: calc(100% - 62px); }
+  .quest-side { padding-left: 58px; }
+  .tasktitle { font-size: 19px; line-height: 1.25; }
+  .taskmeta { gap: 6px; margin-top: 6px; }
+  .battle { margin-bottom: 12px; }
+  .battle-stage { height: 128px; }
+  .hero-sprite .ms-img { transform: scaleX(-1) scale(0.95); }
+  .mob-sprite .ms-img { transform: scale(0.95); }
+  .battle .mob-table, .battle .battle-caption, .battle-info > .btn { display: none; }
+  .battle-info { padding: 8px 12px 10px; }
+  .battle-names { margin: 0 0 6px; font-size: 17px; }
+  .battle .nametag { font-size: 12px; }
+
+  /* Money: the two ledgers as rows - who and how much, then what and when */
+  .tbl-owed thead, .tbl-paid thead { display: none; }
+  .tbl-owed, .tbl-owed tbody, .tbl-paid, .tbl-paid tbody { display: block; width: 100%; }
+  .tbl-owed tr, .tbl-paid tr {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+    padding: 10px 14px; border-bottom: 1px solid #D5DAE1;
+  }
+  .tbl-owed tr:last-child, .tbl-paid tr:last-child { border-bottom: 0; }
+  .tbl-owed td, .tbl-paid td { display: block; padding: 0; border: 0; background: none; }
+  .tbl-owed tr::after, .tbl-paid tr::after { content: ""; order: 3; flex-basis: 100%; height: 0; }
+  .tbl-paid td:nth-child(1) { order: 1; flex: 1 1 0; min-width: 0; font-size: 17px; }
+  .tbl-paid td:nth-child(5) { order: 2; font-size: 17px; }
+  .tbl-paid td:nth-child(2) { order: 4; font-size: 15px; color: var(--ink-2); }
+  .tbl-paid td:nth-child(3) { order: 5; font-size: 14px; color: var(--ink-3); }
+  .tbl-paid td:nth-child(4) { order: 6; font-size: 14px; color: var(--ink-3); }
+  .tbl-paid td:nth-child(3)::before, .tbl-paid td:nth-child(4)::before { content: "\00b7  "; }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(1) { order: 1; align-self: center; }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(2) { order: 2; flex: 1 1 0; min-width: 0; font-size: 17px; }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(5) { order: 2; font-size: 17px; }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(3) { order: 4; font-size: 15px; color: var(--ink-2); padding-left: 30px; }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(4) { order: 5; font-size: 14px; color: var(--ink-3); }
+  .tbl-owed tr:not(.owedsub):not(.owedgrand) td:nth-child(4)::before { content: "\00b7  "; }
+  .tbl-owed tr.owedsub td:first-child, .tbl-owed tr.owedgrand td:first-child { flex: 1 1 0; }
+
+  /* Calendar: gigs as coloured bars in the cell, the details in the day below */
+  .cal-grid.gigs .cal-day, .cal-grid.events .cal-day { min-height: 46px; }
+  .cal-grid.gigs .evchip { height: 6px; margin: 3px 0 0; padding: 0; font-size: 0; line-height: 0; border-radius: 3px; overflow: hidden; }
+  .cal-grid.gigs .evmore { font-size: 11px; line-height: 1.2; }
+  .cal-dow { font-size: 12px; }
+  .cal-day.today .cal-date { width: 22px; height: 22px; font-size: 13px; }
+  .daypanel-x { display: none; }
+  .daypanel-head { flex-wrap: nowrap; align-items: center; gap: 8px; }
+  .daypanel-head strong { flex: 1 1 auto; min-width: 0; font-size: 17px; }
+  .daypanel-head .muted { flex: none; white-space: nowrap; font-size: 14px; }
+  .daypanel-head .btn { flex: none; min-height: 36px; padding: 4px 10px; font-family: var(--font); font-weight: 800; font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .daypanel-row { padding: 9px 12px; }
+  .daypanel-name { font-size: 16px; }
+  .daypanel-venue { font-size: 14px; }
+  .daypanel-name, .daypanel-venue { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Local Events: one show a line */
+  .agenda-tools { flex-wrap: nowrap; align-items: center; gap: 8px; }
+  .agenda-tools .muted { font-size: 14px; }
+  .agenda-tools .btn { flex: none; min-height: 36px; padding: 4px 12px; font-family: var(--font); font-weight: 800; font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .agenda-date { min-height: 46px; padding: 8px 12px; }
+  .agenda-row { padding: 9px 12px; font-size: 16px; }
+  .agenda-body { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
+  .agenda-venue { flex: 0 1 auto; max-width: 66%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agenda-name { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Outreach: a lineup is a two-line row until you open it */
+  .lineup { padding: 10px 12px; margin-bottom: 8px; }
+  .lineup-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; row-gap: 2px; align-items: center; margin: 0; }
+  .lineup-head .agenda-caret { grid-column: 1; grid-row: 1 / span 2; }
+  .lineup-head .lineup-poster { grid-column: 2; grid-row: 1 / span 2; }
+  .lineup-head .lineup-name { grid-column: 3; grid-row: 1; font-family: var(--font); font-weight: 800; font-size: 17px; letter-spacing: 0; text-transform: none; line-height: 1.2; }
+  .lineup-head .lineup-meta { grid-column: 3; grid-row: 2; font-size: 14px; }
+  .lineup-head .btn { grid-column: 1 / -1; justify-self: start; margin: 8px 0 0; }
+  /* The add-a-poster button only showed on hover, so on a phone it was an invisible
+     button over the lineup's name that opened the photo picker. Shut: gone. Open: seen. */
+  .lineup:not(.open) .lineup-head .btn, .lineup:not(.open) .lineup-poster.add { display: none; }
+  .lineup.open .lineup-poster.add { opacity: 1; }
+  .lineup.open .lineup-head { margin-bottom: 10px; }
+}
+
 /* The maps. Each is one drawing: sky, scenery and ground, anchored to the bottom.
    Drawn for this app in the spirit of the game's towns; nothing is taken from it. */
 body, .bd-swatch { --map: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 600' preserveAspectRatio='xMidYMax slice'%3E%3Cdefs%3E%3ClinearGradient id='s' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%237FC8F8'/%3E%3Cstop offset='.62' stop-color='%23CBEBFF'/%3E%3Cstop offset='1' stop-color='%23EAF7FF'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1200' height='600' fill='url(%23s)'/%3E%3Cg fill='%23fff' opacity='.92'%3E%3Cellipse cx='170' cy='110' rx='86' ry='22'/%3E%3Cellipse cx='136' cy='98' rx='40' ry='26'/%3E%3Cellipse cx='196' cy='92' rx='48' ry='32'/%3E%3Cellipse cx='560' cy='70' rx='86' ry='22'/%3E%3Cellipse cx='526' cy='58' rx='40' ry='26'/%3E%3Cellipse cx='586' cy='52' rx='48' ry='32'/%3E%3Cellipse cx='930' cy='130' rx='86' ry='22'/%3E%3Cellipse cx='896' cy='118' rx='40' ry='26'/%3E%3Cellipse cx='956' cy='112' rx='48' ry='32'/%3E%3C/g%3E%3Cpath d='M0 420 Q120 350 260 400 T560 392 T860 380 T1200 404 V600 H0Z' fill='%23BFE8A2'/%3E%3Cg transform='translate(150 300) scale(0.9)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23F28A1E' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cg transform='translate(880 290) scale(1.0)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23E8564A' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cg transform='translate(1010 330) scale(0.7)'%3E%3Crect x='22' y='44' width='40' height='50' fill='%23FFF1D6' stroke='%237A4A24' stroke-width='3'/%3E%3Crect x='34' y='64' width='16' height='30' rx='8' fill='%238A5A30'/%3E%3Cpath d='M0 50 Q42 -12 84 50 Z' fill='%23F2B01E' stroke='%237A3A10' stroke-width='3'/%3E%3Ccircle cx='26' cy='30' r='7' fill='%23FFE7C2'/%3E%3Ccircle cx='54' cy='20' r='6' fill='%23FFE7C2'/%3E%3Ccircle cx='64' cy='38' r='5' fill='%23FFE7C2'/%3E%3C/g%3E%3Cpath d='M0 470 Q180 425 380 462 T780 456 T1200 470 V600 H0Z' fill='%238FD45F'/%3E%3Cpath d='M0 520 Q300 495 600 515 T1200 512 V600 H0Z' fill='%236CC24A'/%3E%3Cpath d='M0 520 Q300 495 600 515 T1200 512' fill='none' stroke='%234E9A34' stroke-width='6'/%3E%3C/svg%3E"); }

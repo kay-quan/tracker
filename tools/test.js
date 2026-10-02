@@ -60,7 +60,13 @@ const sandbox = {
   history: { replaceState: noop },
   localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
   fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-  matchMedia: () => ({ matches: false, addEventListener: noop, addListener: noop }),
+  /* Screen width is a test setting (sandbox.__width), read live so one test can be a
+     phone and the next a desktop without reloading the app. */
+  matchMedia: (q) => {
+    const m = /max-width:\s*(\d+)px/.exec(q);
+    return { get matches() { return !!m && (sandbox.__width || 1200) <= Number(m[1]); },
+             addEventListener: noop, addListener: noop };
+  },
   Cloud: {
     restore: noop, signedIn: () => false, signIn: noop, signOut: noop,
     load: () => Promise.resolve(null), save: () => Promise.resolve(),
@@ -106,6 +112,7 @@ let app = read("app.js").replace(
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
   "  heroTitle, addDays, avatarOf, avatarItems, avatarURL, weaponActions, closetBase, closetName,\n" +
   "  closetWear, AVATAR_DEFAULT, bossProgress, rewardProgress, mapOpen, WORLD, STAT_GUIDE, STAT_WORDS,\n" +
+  "  isPhone, subOf, emailNextRows, followUpRows, followRank, eventMatches, eventsSearch, eventCountCell,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1421,6 +1428,118 @@ t("the stat key covers every stat", () => {
     if (!T.STAT_GUIDE[x.id] || !T.STAT_GUIDE[x.id].examples) throw new Error("no guide for " + x.name);
     if (!T.STAT_WORDS[x.id].length) throw new Error("no Auto words for " + x.name);
   });
+});
+
+/* ---------- the phone layout ---------- */
+
+// Renders a view as a phone (390px wide) would, then puts the width back.
+function asPhone(fn) {
+  sandbox.__width = 390;
+  try { return fn(); } finally { sandbox.__width = 0; }
+}
+
+t("a phone shows one section of a page at a time; a desktop shows them all", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
+  db.income = [{ id: "n1", date: new Date().getFullYear() + "-03-02", amount: 500, source: "Sample" }];
+  T.setDB(db);
+  T.setState({ view: "money", calMonth: null, period: "year", year: new Date().getFullYear() });
+  eq(T.isPhone(), false);
+  const desk = T.VIEWS.money();
+  ["Awaiting payment", "Collected", "In vs. out", "Where it went"].forEach((h) => {
+    if (desk.indexOf(h) < 0) throw new Error("desktop lost " + h);
+  });
+  if (desk.indexOf("subtabs") >= 0) throw new Error("desktop got phone sub-tabs");
+  const phone = asPhone(() => T.VIEWS.money());
+  if (phone.indexOf('class="subtabs"') < 0) throw new Error("no sub-tabs on a phone");
+  if (phone.indexOf("Awaiting payment") < 0) throw new Error("Overview should hold what's owed");
+  if (phone.indexOf("Where it went") >= 0 || phone.indexOf("In vs. out") >= 0) throw new Error("phone built every section");
+  T.getState().sub = { money: "spent" };
+  const spent = asPhone(() => T.VIEWS.money());
+  if (spent.indexOf("Where it went") < 0 || spent.indexOf("Awaiting payment") >= 0) throw new Error("Spent shows the wrong section");
+});
+
+t("a sub-tab opens on what needs you, and remembers what you picked", () => {
+  const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  T.setState({ view: "invoices" });
+  eq(T.subOf("invoices", tabs), "a", "the first by default");
+  eq(T.subOf("invoices", tabs, "c"), "c", "or the one that needs you");
+  T.getState().sub = { invoices: "b" };
+  eq(T.subOf("invoices", tabs, "c"), "b", "your pick wins");
+  T.getState().sub = { invoices: "gone" };
+  eq(T.subOf("invoices", tabs, "c"), "c", "a pick that no longer exists falls back");
+});
+
+t("Email next: reachable, not yet written to, once each, drafts first then smallest", () => {
+  const fest = Object.keys(F)[0];
+  const rows = T.lineupRows(fest, []);
+  const withMail = rows.filter((r) => r.email);
+  const a = withMail[0], b = withMail[1];
+  // b has been written to; a was drafted but not sent.
+  const outreach = [
+    { id: "x1", venue: a.venue, festival: fest, email: a.email, status: "to-contact", draftedAt: "2026-10-01" },
+    { id: "x2", venue: b.venue, festival: fest, email: b.email, status: "contacted" },
+    { id: "x3", venue: "Sample Rooftop", email: "roof@example.test", status: "to-contact" },
+  ];
+  const next = T.emailNextRows(outreach);
+  eq(next[0].venue, a.venue, "drafted-not-sent leads");
+  if (next.some((r) => r.venue === b.venue)) throw new Error("someone already written to is still up next");
+  if (next.some((r) => !r.email)) throw new Error("an act with no address is up next");
+  if (!next.some((r) => r.venue === "Sample Rooftop")) throw new Error("a venue you added by hand is missing");
+  const keys = next.map((r) => T.akey(r.venue));
+  eq(new Set(keys).size, keys.length, "an act on two lineups appears twice");
+  const fo = next.slice(1).map((r) => T.followersOf(r.venue)).filter((f) => f != null);
+  for (let i = 1; i < fo.length; i++) if (fo[i] < fo[i - 1]) throw new Error("not smallest following first");
+});
+
+t("Follow up: replies, then due follow-ups, then set ones, then the longest quiet", () => {
+  const today = "2026-10-02";
+  const rows = [
+    { id: "1", venue: "Quiet long", status: "contacted", lastContact: "2026-09-01" },
+    { id: "2", venue: "Set later", status: "follow-up", nextFollowUp: "2026-10-09" },
+    { id: "3", venue: "Booked", status: "booked" },
+    { id: "4", venue: "Due", status: "contacted", nextFollowUp: "2026-09-30" },
+    { id: "5", venue: "Replied", status: "replied", lastContact: "2026-09-28" },
+    { id: "6", venue: "Quiet short", status: "contacted", lastContact: "2026-09-25" },
+    { id: "7", venue: "Not yet", status: "to-contact" },
+  ];
+  eq(T.followUpRows(rows, today).map((r) => r.venue).join(","), "Replied,Due,Set later,Quiet long,Quiet short");
+  eq(T.followRank(rows[3], today), 1, "a follow-up dated before today is due");
+});
+
+t("Local Events search finds a venue or an act, upcoming only", () => {
+  const db = T.withDefaults(T.defaultData());
+  T.setDB(db);
+  const t0 = T.addDays(new Date().toISOString().slice(0, 10), 0);
+  const ev = [
+    { id: "1", date: T.addDays(t0, 2), venue: "Cobalt Hall", artists: ["Nova Drift"], name: "" },
+    { id: "2", date: T.addDays(t0, 3), venue: "Echo Hangar", artists: ["Kilo Hearts", "Nova Drift"], name: "" },
+    { id: "3", date: T.addDays(t0, -3), venue: "Cobalt Hall", artists: ["Old Show"], name: "" },
+    { id: "4", date: T.addDays(t0, 5), venue: "Parkside", artists: ["Velour"], name: "Afterglow Night" },
+  ];
+  eq(T.eventMatches(ev[1], "nova"), true, "an act on the bill");
+  eq(T.eventMatches(ev[3], "afterglow"), true, "the event's own name");
+  eq(T.eventMatches(ev[3], "cobalt"), false);
+  const html = T.eventsSearch("cobalt", ev);
+  if (html.indexOf("1 upcoming show") < 0) throw new Error("a past show was counted: " + html.slice(0, 80));
+  if (T.eventsSearch("zzz", ev).indexOf("No upcoming shows") < 0) throw new Error("no empty message");
+  eq(T.eventCountCell([]), "", "an empty day says nothing");
+  if (T.eventCountCell([ev[0], ev[1]]).indexOf(">2<") < 0) throw new Error("a day doesn't say how many");
+});
+
+t("a phone's Today puts quests before the stats, which fold away", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
+  db.todos = [{ id: "a", text: "Ship the jacket", stat: "hustle", top: true, topRank: 0 }];
+  T.setDB(db);
+  T.setState({ view: "today", showDone: false });
+  const html = asPhone(() => T.VIEWS.today());
+  const quests = html.indexOf("Today’s quests"), stats = html.indexOf('data-fold="today-stats"');
+  if (quests < 0 || stats < 0) throw new Error("missing quests or the stats fold");
+  if (stats < quests) throw new Error("stats come before quests on a phone");
+  const panel = html.indexOf("stats-head");
+  if (panel >= 0 && panel < quests) throw new Error("the full stats panel still sits above the quests");
+  if (/data-fold="today-stats"[^>]* open/.test(html)) throw new Error("the stats fold should start shut");
 });
 
 /* ---------- report ---------- */

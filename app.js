@@ -845,8 +845,15 @@ function mapName() {
 function renderHeader() {
   const name = DB.settings.businessName || DB.settings.yourName;
   const first = firstName();
+  /* On a phone the header is one slim line: which page this is, the streak and the
+     gear. Your name, the EXP and the year's money are already in the bar along the
+     bottom, so repeating them up here only pushed every page down a quarter-screen. */
+  const phoneTitle = { settings: "Settings", income: "Payments", expenses: "Expenses",
+    clients: "Clients", gigs: "Gigs" }[state.view] ||
+    (TABS.find((t) => t.view === state.view) || {}).label;
   $("#app-title").textContent = state.view === "today"
     ? "Ready to play" + (first ? ", " + first : "") + "?"
+    : isPhone() && phoneTitle ? phoneTitle
     : name || "Income Tracker";
   document.title = name ? name + " \u00b7 Tracker" : "Income Tracker";
   renderHud();
@@ -3194,6 +3201,18 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "A phone layout: one section at a time",
+    asked: "On my phone everything is tight and takes up the whole screen, and I have to scroll forever to get to my stuff. Local Events doesn’t even show the calendar, just a long list. Money and Outreach take forever to find what I need.",
+    changed: [
+      "On a phone, each page has sub-tabs across the top that stay put as you scroll, and only shows the one you pick. Money: Overview, Months, Paid, Spent. Invoices: To send, Get paid, Paid (it opens on whatever needs you). Calendar: My gigs, Local events. The desktop layout hasn’t changed.",
+      "The header on a phone is one slim line: the page, your streak and the gear. The level, EXP and year’s money were already in the bar at the bottom.",
+      "Today on a phone: your quests come first, under a slimmer fight strip. Your stats fold away at the bottom.",
+      "Local Events on a phone (and a tablet) shows the calendar now, with how many shows are on each day. Tap a day for its list, one show a line. There’s a search box for a venue or artist, and the list view opens on the coming week.",
+      "Outreach on a phone: Lineups (each one a two-line row until you open it), Email next (everyone with an address you haven’t written to, smallest following first, with a Draft button each), Follow up (replies first, then follow-ups that are due), and All.",
+      "The invisible “add a poster” button on each lineup, which opened the photo picker by accident, only appears once the lineup is open.",
+      "Money on a phone: payments are two-line rows instead of a squashed table, and each month’s made, owed and projected sit side by side.",
+      "The “Peak month” line under the money chart is readable.",
+    ] },
   { date: "2026-10-02", title: "All the loot, tidier stats and Outreach, a proper Completed bar",
     asked: "The spacing between the stats on the Personal tab looked off. Show me the loot I haven\u2019t unlocked yet. Make the Outreach line about acts and lineups easier to read, even out the two By month cards on Money, and give \u201cCompleted\u201d on Today a background so it fits in.",
     changed: [
@@ -3301,8 +3320,10 @@ function foldState() {
 }
 const foldOpen = (key) => foldState()[key] !== false;
 
-function fold(key, head, intro, body) {
-  return '<details class="fold" data-fold="' + key + '"' + (foldOpen(key) ? " open" : "") + ">" +
+// Folds start open unless `shut` says otherwise; either way the phone remembers yours.
+function fold(key, head, intro, body, shut) {
+  const open = shut ? foldState()[key] === true : foldOpen(key);
+  return '<details class="fold" data-fold="' + key + '"' + (shut ? ' data-fold-shut="1"' : "") + (open ? " open" : "") + ">" +
     '<summary class="section-head fold-head"><span class="fold-title">' + head + "</span>" +
     '<span class="fold-caret" aria-hidden="true"></span></summary>' +
     '<div class="fold-body">' + (intro ? '<p class="fold-intro">' + intro + "</p>" : "") + body + "</div></details>";
@@ -3312,7 +3333,8 @@ document.addEventListener("toggle", (e) => {
   const d = e.target;
   if (!d || !d.dataset || !d.dataset.fold) return;
   const s = foldState();
-  if (d.open) delete s[d.dataset.fold]; else s[d.dataset.fold] = false;
+  if (d.dataset.foldShut) { if (d.open) s[d.dataset.fold] = true; else delete s[d.dataset.fold]; }
+  else if (d.open) delete s[d.dataset.fold]; else s[d.dataset.fold] = false;
   try { localStorage.setItem("tracker.folds", JSON.stringify(s)); } catch (err) { /* private mode: just don't remember */ }
 }, true);
 
@@ -3565,7 +3587,12 @@ function statTile(s, o) {
     '<span class="stat-xp">' + o.into + "/" + o.need + "</span></span></div>";
 }
 
-function statsPanel(sheet, g) {
+// `bare` leaves off the heading, for inside a fold that already says "Your stats".
+function statsPanel(sheet, g, bare) {
+  if (bare) {
+    return '<section class="card stats-panel">' +
+      '<div class="stat-tiles">' + STATS.map((s) => statTile(s, sheet[s.id])).join("") + "</div></section>";
+  }
   return '<section class="card stats-panel" aria-labelledby="stats-h">' +
     '<div class="stats-head"><h2 id="stats-h">Your stats</h2>' +
     '<a href="#" class="stats-hero" data-act="goto" data-view="personal" title="Hero level: every stat added together">' +
@@ -3580,8 +3607,10 @@ VIEWS.today = function () {
   const today = todayISO();
   let html = "";
 
-  /* ---- the five stats, full width under the header ---- */
-  html += statsPanel(sheet, g);
+  /* ---- the five stats, full width under the header. A phone puts today's quests
+     first instead, and folds the stats away at the bottom (Kevin, 2026-10-02). ---- */
+  const phone = isPhone();
+  if (!phone) html += statsPanel(sheet, g);
 
   /* ---- today's quests: your Top 3 picks, plus what you finished today.
      Nothing picked? Up next falls back to the open task due soonest, so there is
@@ -3659,6 +3688,9 @@ VIEWS.today = function () {
   html += gachaponCard() + bossCard() + rewardCard();
 
   html += "</aside></div>";
+  if (phone) {
+    html += fold("today-stats", "Your stats · Hero Lv." + g.level, "", statsPanel(sheet, g, true), true);
+  }
   return html;
 };
 
@@ -3688,13 +3720,20 @@ VIEWS.money = function () {
     (f.goal ? row("Pace needed", money(f.pace) + "/wk", "") : "") +
     "</div></div>";
 
-  html += '<div class="btn-row">' +
-    '<button class="btn" data-act="new-income">Log income</button>' +
-    '<button class="btn" data-act="new-expense">Log expense</button>' +
+  const phone = isPhone();
+  const heroHTML = html;
+  const logBtns = '<button class="btn" data-act="new-income">Log income</button>' +
+    '<button class="btn" data-act="new-expense">Log expense</button>';
+  html += '<div class="btn-row">' + logBtns +
     '<button class="btn" data-act="goto" data-view="income">Payments received</button>' +
     '<button class="btn" data-act="goto" data-view="expenses">All expenses</button></div>';
 
+  /* Each section is kept on its own so a phone can show one at a time. */
+  const part = {};
+  const mark = (k) => { part[k] = html.length; };
+
   /* ---- By month: made, owed, projected ---- */
+  mark("months");
   const gigs = workGigs();
   const mm = moneyByMonth(gigs);
   const mkeys = Object.keys(mm).sort();
@@ -3712,6 +3751,7 @@ VIEWS.money = function () {
   }
 
   /* ---- Awaiting payment ---- */
+  mark("owed");
   const owedRows = gigs
     .filter((g) => !gigIsPaid(g) || gigPaid(g) > 0)
     .filter((g) => !gigIsPaid(g) || (g.date || "") >= addDays(todayISO(), -30))
@@ -3720,7 +3760,7 @@ VIEWS.money = function () {
 
   html += '<h2 class="section-head">Awaiting payment' +
     (ot.total ? ' <span class="count">' + money(ot.total) + "</span>" : "") + "</h2>";
-  html += '<div class="card tablewrap"><table><thead><tr><th></th><th>Client</th>' +
+  html += '<div class="card tablewrap"><table class="tbl-owed"><thead><tr><th></th><th>Client</th>' +
     "<th>Gig</th><th>Date</th><th class=\"r\">Amount</th></tr></thead><tbody>";
   if (!owedRows.length) {
     html += '<tr><td colspan="5" class="muted">All caught up — nothing owed.</td></tr>';
@@ -3750,6 +3790,7 @@ VIEWS.money = function () {
   html += "</tbody></table></div>";
 
   /* ---- Collected ---- */
+  mark("paid");
   const yr = { from: f.year + "-01-01", to: f.year + "-12-31" };
   const collected = DB.income.filter((i) => inRange(i.date, yr))
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -3758,7 +3799,7 @@ VIEWS.money = function () {
   html += '<h2 class="section-head">Collected' +
     (collTotal ? ' <span class="count">' + money(collTotal) + "</span>" : "") +
     '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button></h2>';
-  html += '<div class="card tablewrap"><table><thead><tr><th>Client</th><th>Gig</th>' +
+  html += '<div class="card tablewrap"><table class="tbl-paid"><thead><tr><th>Client</th><th>Gig</th>' +
     "<th>Date</th><th>How</th><th class=\"r\">Amount</th></tr></thead><tbody>";
   if (!collected.length) {
     html += '<tr><td colspan="5" class="muted">Nothing collected in ' + f.year +
@@ -3779,14 +3820,40 @@ VIEWS.money = function () {
   }
   html += "</tbody></table></div>";
 
+  mark("chart");
   html += '<h2 class="section-head">In vs. out</h2>' +
     '<div class="card card-pad">' + monthlyChart() + "</div>";
+  mark("spent");
   html += '<h2 class="section-head">Where it went</h2>' +
     '<div class="card card-pad">' +
     breakdown(groupSum(DB.expenses.filter((e) => (e.date || "").slice(0, 4) === String(f.year)),
       (e) => e.category || "Uncategorised"), "var(--money-out)", "No expenses logged this year.") +
     "</div>";
-  return html;
+  if (!phone) return html;
+
+  /* ---- the phone: one section at a time ---- */
+  const cut = (from, to) => html.slice(part[from], to ? part[to] : html.length);
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "months", label: "Months" },
+    { id: "paid", label: "Paid", n: collected.length },
+    { id: "spent", label: "Spent" },
+  ];
+  const sub = subOf("money", tabs);
+  let out = subTabs("money", tabs);
+  if (sub === "overview") {
+    out += heroHTML + '<div class="btn-row">' + logBtns + "</div>" + cut("owed", "paid");
+  } else if (sub === "months") {
+    out += cut("months", "owed") + cut("chart", "spent");
+  } else if (sub === "paid") {
+    out += cut("paid", "chart") +
+      '<div class="btn-row"><button class="btn" data-act="goto" data-view="income">All payments, by period</button></div>';
+  } else {
+    out += cut("spent") + '<div class="btn-row">' +
+      '<button class="btn" data-act="new-expense">Log expense</button>' +
+      '<button class="btn" data-act="goto" data-view="expenses">All expenses</button></div>';
+  }
+  return out;
 };
 
 function row(label, value, tone) {
@@ -3803,6 +3870,13 @@ VIEWS.calendar = function () {
 };
 
 function calTabs() {
+  // On a phone these are the page's sub-tabs, across the top like every other page's.
+  if (isPhone()) {
+    const on = state.calMode === "events" ? "events" : "gigs";
+    const st = (mode, label) => '<button class="subtab' + (on === mode ? " on" : "") + '" role="tab" aria-selected="' +
+      (on === mode) + '" data-act="cal-mode" data-mode="' + mode + '">' + label + "</button>";
+    return '<div class="subtabs" role="tablist">' + st("gigs", "My gigs") + st("events", "Local events") + "</div>";
+  }
   const t = (mode, label) =>
     '<button class="seg' + (state.calMode === mode || (mode === "gigs" && !state.calMode) ? " active" : "") +
     '" data-act="cal-mode" data-mode="' + mode + '">' + label + "</button>";
@@ -3956,7 +4030,10 @@ function gigsCalendar() {
     state.gigDay = t.slice(0, 7) === state.calMonth ? t : state.calMonth + "-01";
   }
 
-  let html =
+  const phone = isPhone();
+  /* A phone drops the page heading (the header already says Calendar) and its two
+     add buttons: the selected day's panel has both, already set to that day. */
+  let html = phone ? calTabs() :
     '<div class="page-head"><div><h1>Calendar</h1></div>' +
     '<div class="page-actions">' + calTabs() +
     '<button class="btn" data-act="new-personal">＋ Add event</button>' +
@@ -3969,7 +4046,7 @@ function gigsCalendar() {
   const mm = moneyByMonth(live)[state.calMonth] || { made: 0, upcoming: 0, tbd: 0 };
   const shortMonth = monthLabelOf(state.calMonth).split(" ")[0];
   html += '<div class="monthstrip">' +
-    '<div class="card stat made"><div class="lbl">Made · ' + esc(shortMonth) + "</div>" +
+    '<div class="card stat made"><div class="lbl">Made' + (phone ? "" : " · " + esc(shortMonth)) + "</div>" +
     '<div class="val"' + (mm.made < 0 ? ' style="color:var(--money-out)"' : "") + ">" +
     money(mm.made) + "</div>" +
     '<div class="sub">net, collected' + (mm.made < 0 ? " — costs ahead of income" : "") + "</div></div>" +
@@ -4106,10 +4183,9 @@ function gigDayPanel(list, pers) {
   return html + "</div>";
 }
 
-function eventsCalendar() {
+// The shows after the Everything / Shows / Festivals filter, bucketed by day.
+function eventsData() {
   const all = DB.localEvents || [];
-  // An open day from another month would render a panel with no cell to belong to.
-  if (state.eventDay && state.eventDay.slice(0, 7) !== state.calMonth) state.eventDay = null;
   // Edmtrain flags festivals separately from club and venue shows. They're
   // different propositions - multi-day, booked further out - so they can be
   // looked at on their own.
@@ -4126,12 +4202,20 @@ function eventsCalendar() {
     byDate[d].sort((a, b) => (b.festival ? 1 : 0) - (a.festival ? 1 : 0) ||
       (a.venue || "").localeCompare(b.venue || ""));
   });
+  return { all, kind, events, byDate };
+}
+
+function eventsCalendar() {
+  // An open day from another month would render a panel with no cell to belong to.
+  if (state.eventDay && state.eventDay.slice(0, 7) !== state.calMonth) state.eventDay = null;
+  const { all, kind, byDate, events } = eventsData();
+  const phone = isPhone();
   const monthEvents = events.filter((e) => e.date && e.date.slice(0, 7) === state.calMonth);
   const venues = new Set(monthEvents.map((e) => e.venue).filter(Boolean));
   const kindWord = kind === "festival" ? "festival" : "show";
   const n = monthEvents.length;
 
-  let html =
+  let html = phone ? calTabs() :
     '<div class="page-head"><div><h1>Local Events</h1><p>' +
     (all.length
       ? (n
@@ -4146,16 +4230,18 @@ function eventsCalendar() {
     '<button class="btn" data-act="refresh-events">Refresh</button>' +
     '<button class="btn btn-primary" data-act="new-local-event">Add event</button></div></div>';
 
-  html += eventsStatusBar();
+  // A phone only gets the warning when the feed is stale; "updated 3h ago" sits at the foot.
+  const age = eventsAgeHours();
+  html += !phone || (age !== null && age > 24) ? eventsStatusBar() : "";
   if (!all.length) return html + eventsEmptyState();
 
   const inMonth = (list) => list.filter((e) => (e.date || "").slice(0, 7) === state.calMonth).length;
   const kinds = [
-    { key: "", label: "Everything", n: inMonth(all) },
+    { key: "", label: phone ? "All" : "Everything", n: inMonth(all) },
     { key: "show", label: "Shows", n: inMonth(all.filter((e) => !e.festival)) },
-    { key: "festival", label: "Festivals", n: inMonth(all.filter((e) => e.festival)) },
+    { key: "festival", label: phone ? "Fests" : "Festivals", n: inMonth(all.filter((e) => e.festival)) },
   ];
-  html += '<div class="chips">' + kinds.map((k) =>
+  const chips = '<div class="chips">' + kinds.map((k) =>
     '<button class="chip' + (kind === k.key ? " active" : "") +
     '" data-act="event-kind" data-key="' + k.key + '">' + esc(k.label) +
     '<span class="n">' + k.n + "</span></button>").join("") + "</div>";
@@ -4165,17 +4251,31 @@ function eventsCalendar() {
      scrolling past all thirty. The grid answers "what does the month look like";
      the list answers "show me everything". Pick one. */
   const view = state.eventView || "calendar";
-  const seg = (m, label) => '<button class="seg' + (view === m ? " active" : "") +
-    '" data-act="event-view" data-mode="' + m + '">' + label + "</button>";
-  html += '<div class="btn-row"><div class="segmented">' +
-    seg("calendar", "\u25a6 Calendar") + seg("list", "\u2630 List") + "</div></div>";
+  const seg = (m, label, aria) => '<button class="seg' + (view === m ? " active" : "") +
+    '" data-act="event-view" data-mode="' + m + '"' + (aria ? ' aria-label="' + aria + '" title="' + aria + '"' : "") +
+    ">" + label + "</button>";
+
+  if (phone) {
+    /* Find a venue or artist: typing narrows the page in place (see the input
+       listener), so the box keeps focus and the keyboard stays up. */
+    html += '<div class="ev-search"><input id="ev-search" type="search" autocomplete="off" enterkeyhint="search"' +
+      ' placeholder="Find a venue or artist" aria-label="Find a venue or artist" value="' + esc(state.eventSearch || "") + '">' +
+      '<button class="btn" data-act="new-local-event" aria-label="Add a show" title="Add a show">＋</button>' +
+      '<button class="btn" data-act="refresh-events" aria-label="Refresh the feed" title="Refresh the feed">↻</button></div>';
+    html += '<div class="ev-filters">' + chips + '<div class="segmented">' +
+      seg("calendar", "▦", "Calendar") + seg("list", "☰", "List") + "</div></div>";
+    return html + '<div id="ev-body">' + eventsBody() + "</div>";
+  }
+
+  html += chips + '<div class="btn-row"><div class="segmented">' +
+    seg("calendar", "▦ Calendar") + seg("list", "☰ List") + "</div></div>";
 
   html += calNav(monthLabelOf(state.calMonth));
 
-  // A seven-column grid is unreadable on a phone, so there the list is the only view.
-  if (view === "list" || isNarrow()) { return html + eventsAgenda(byDate); }
+  if (view === "list") { return html + eventsAgenda(byDate); }
 
-  html += monthGrid((iso) => {
+  // Too narrow for names (a tablet): each day says how many, and opens on a tap.
+  html += monthGrid(isNarrow() ? (iso) => eventCountCell(byDate[iso] || []) : (iso) => {
     const list = byDate[iso] || [];
     return list.slice(0, 3).map((e) =>
       '<div class="cal-event ev-show' + (e.manual ? " ev-mine" : e.festival ? " ev-fest" : "") +
@@ -4201,6 +4301,63 @@ function eventsCalendar() {
   return html;
 }
 
+/* A phone's Local Events below the search box: what you searched for, or the month
+   (as a grid of counts with one day open underneath, or as a list). Rebuilt on its
+   own while you type, so the search box never loses focus. */
+function eventsBody() {
+  const { events, byDate } = eventsData();
+  const q = (state.eventSearch || "").trim().toLowerCase();
+  if (q.length >= 2) return eventsSearch(q, events);
+
+  let html = calNav(monthLabelOf(state.calMonth));
+  const age = eventsAgeHours();
+  const foot = age !== null && age <= 24 ? eventsStatusBar() : "";
+  if ((state.eventView || "calendar") === "list") return html + eventsAgenda(byDate) + foot;
+
+  // There is always a day open, so the grid never sits there saying nothing.
+  if (!state.eventDay) {
+    const t = todayISO();
+    state.eventDay = t.slice(0, 7) === state.calMonth ? t : state.calMonth + "-01";
+  }
+  html += monthGrid((iso) => eventCountCell(byDate[iso] || []), "local-day");
+  return html + dayPanel(byDate) + foot;
+}
+
+// A day too narrow for names says how many shows it has, and flags a festival.
+function eventCountCell(list) {
+  if (!list.length) return "";
+  return '<span class="cal-count">' + list.length + "</span>" +
+    (list.some((e) => e.festival) ? '<i class="cal-flag fest" title="Festival"></i>' : "") +
+    (list.some((e) => e.manual) ? '<i class="cal-flag mine" title="Added by you"></i>' : "");
+}
+
+// Every upcoming show whose name, venue or lineup has the words in it, by day.
+function eventMatches(e, q) {
+  return [eventName(e), e.venue || "", (e.artists || []).join(" ")].join(" ").toLowerCase().indexOf(q) >= 0;
+}
+
+function eventsSearch(q, events) {
+  const today = todayISO();
+  const hits = events.filter((e) => (e.date || "") >= today && eventMatches(e, q))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.venue || "").localeCompare(b.venue || ""));
+  if (!hits.length) {
+    return '<p class="ev-found">No upcoming shows match “' + esc(q) + "”.</p>";
+  }
+  const CAP = 80;
+  const byDay = {};
+  hits.slice(0, CAP).forEach((e) => { (byDay[e.date] = byDay[e.date] || []).push(e); });
+  return '<p class="ev-found">' + hits.length + " upcoming show" + (hits.length === 1 ? "" : "s") +
+    (hits.length > CAP ? ", the first " + CAP + " below. Keep typing to narrow it." : "") + "</p>" +
+    // One card, a thin date line over each day's shows.
+    '<div class="agenda-day open ev-hits">' + Object.keys(byDay).sort().map((d) => {
+      const day = parseISO(d);
+      return '<div class="agenda-date is-static">' +
+        esc(day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })) +
+        (d === today ? " \u00b7 today" : "") + "</div>" +
+        byDay[d].map(agendaRow).join("");
+    }).join("") + "</div>";
+}
+
 // Seven columns need roughly 900px to stay legible. Below that a month grid
 // gives each day about 50px, which cannot hold a venue name, so the same events
 // are listed by day instead.
@@ -4209,6 +4366,31 @@ function isNarrow() { return NARROW.matches; }
 
 // Re-render when crossing the breakpoint so the right layout is always showing.
 NARROW.addEventListener("change", () => { if (DB) render(); });
+
+/* Phones get their own shape (Kevin, 2026-10-02: "I have to scroll forever to get
+   to my stuff"). A tab shows one section at a time, picked from a row of sub-tabs
+   across the top, instead of stacking every section into one long scroll. Only the
+   section you're on is built at all. Desktop keeps the whole page. */
+const PHONE = window.matchMedia("(max-width: 640px)");
+function isPhone() { return PHONE.matches; }
+PHONE.addEventListener("change", () => { if (DB) render(); });
+
+// The section you picked, else `def` (the one that most needs you), else the first.
+function subOf(view, tabs, def) {
+  const s = (state.sub || {})[view];
+  if (tabs.some((t) => t.id === s)) return s;
+  return tabs.some((t) => t.id === def) ? def : tabs[0].id;
+}
+
+// tabs: [{ id, label, n, alert }] - n is a small count badge, alert colours it red.
+function subTabs(view, tabs, def) {
+  const cur = subOf(view, tabs, def);
+  return '<div class="subtabs" role="tablist">' + tabs.map((t) =>
+    '<button class="subtab' + (t.id === cur ? " on" : "") + '" role="tab" aria-selected="' + (t.id === cur) +
+    '" data-act="sub" data-view="' + view + '" data-sub="' + t.id + '">' + esc(t.label) +
+    (t.n ? '<span class="subtab-n' + (t.alert ? " alert" : "") + '">' + (t.n > 999 ? "999+" : t.n) + "</span>" : "") +
+    "</button>").join("") + "</div>";
+}
 
 /* The opened day. Sits under the grid, closes on the same click that opened it,
    and says once at the top whether you are already booked - not on every row. */
@@ -4252,25 +4434,34 @@ function dayPanel(byDate) {
 }
 
 function eventsAgenda(byDate) {
-  const dates = Object.keys(byDate)
+  const today = todayISO();
+  const phone = isPhone();
+  let dates = Object.keys(byDate)
     .filter((d) => d.slice(0, 7) === state.calMonth)
     .sort();
+  // On a phone the current month starts at today: a show that's been is no use to you.
+  const past = phone && state.calMonth === today.slice(0, 7) ? dates.filter((d) => d < today).length : 0;
+  if (past) dates = dates.filter((d) => d >= today);
   if (!dates.length) {
     return '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
-      "Nothing listed for " + esc(monthLabelOf(state.calMonth)) + ".</p></div>";
+      "Nothing listed for " + esc(monthLabelOf(state.calMonth)) + (past ? " from today on" : "") + ".</p></div>";
   }
-  const today = todayISO();
   /* A month of LA listings runs to hundreds of rows, and scrolling all of it to reach
      one Saturday is the wrong shape. Each day is a header you open; today starts open
-     so the list is useful the moment it loads, and opening one does not close the rest. */
+     so the list is useful the moment it loads, and opening one does not close the rest.
+     A phone opens the whole coming week, for scanning what's on. */
   const openDays = state.openAgenda || (state.openAgenda = {});
-  if (!Object.keys(openDays).length && dates.indexOf(today) >= 0) openDays[today] = true;
+  if (!Object.keys(openDays).length) {
+    const until = phone ? addDays(today, 6) : today;
+    dates.filter((d) => d >= today && d <= until).forEach((d) => { openDays[d] = true; });
+  }
 
   const total = dates.reduce((n, d) => n + byDate[d].length, 0);
+  // A phone has room for one button, and opening every day of a month is never it.
   let html = '<div class="agenda-tools">' +
     '<span class="muted">' + total + " show" + (total === 1 ? "" : "s") +
-    " across " + dates.length + " day" + (dates.length === 1 ? "" : "s") + "</span>" +
-    '<button class="btn btn-sm" data-act="agenda-all" data-open="1">Expand all</button>' +
+    " across " + dates.length + " day" + (dates.length === 1 ? "" : "s") + (past ? " from today" : "") + "</span>" +
+    (phone ? "" : '<button class="btn btn-sm" data-act="agenda-all" data-open="1">Expand all</button>') +
     '<button class="btn btn-sm" data-act="agenda-all" data-open="">Collapse all</button></div>';
 
   return html + dates.map((d) => {
@@ -4287,23 +4478,26 @@ function eventsAgenda(byDate) {
       (d === today ? '<span class="agenda-dow">today</span>' : "") +
       '<span class="agenda-count">' + list.length + " show" + (list.length === 1 ? "" : "s") + "</span></button>" +
       (isOpen ? "" : "<!--collapsed-->") +
-      (!isOpen ? "" : list.map((e) =>
-        '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
-        '" data-act="show-event" data-id="' +
-        esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
-        '<div class="agenda-venue">' + esc(eventName(e)) +
-        (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</div>" +
-        // When the feed gave no lineup the headline falls back to the venue,
-        // so don't print the venue a second time underneath it.
-        (function () {
-          const sub = [];
-          if (e.venue && eventName(e) !== e.venue) sub.push(esc(e.venue));
-          if (e.ages) sub.push(esc(e.ages));
-          return sub.length ? '<div class="agenda-name">' + sub.join(" \u00b7 ") + "</div>" : "";
-        })() +
-        "</div></div>").join("")) +
+      (!isOpen ? "" : list.map(agendaRow).join("")) +
       "</div>";
   }).join("");
+}
+
+function agendaRow(e) {
+  return '<div class="agenda-row' + (e.manual ? " mine" : e.festival ? " fest" : "") +
+    '" data-act="show-event" data-id="' +
+    esc(e.id) + '"><span class="agenda-dot"></span><div class="agenda-body">' +
+    '<div class="agenda-venue">' + esc(eventName(e)) +
+    (e.festival ? ' <span class="tag-fest">festival</span>' : "") + "</div>" +
+    // When the feed gave no lineup the headline falls back to the venue,
+    // so don't print the venue a second time underneath it.
+    (function () {
+      const sub = [];
+      if (e.venue && eventName(e) !== e.venue) sub.push(esc(e.venue));
+      if (e.ages) sub.push(esc(e.ages));
+      return sub.length ? '<div class="agenda-name">' + sub.join(" \u00b7 ") + "</div>" : "";
+    })() +
+    "</div></div>";
 }
 
 // Who's playing, which is the thing worth reading at a glance. The lineup is
@@ -4637,13 +4831,27 @@ VIEWS.invoices = function () {
     return st !== "paid" && st !== "draft" && invoiceTotals(inv).total > 0;
   });
 
-  let html = '<div class="stat-trio">' +
+  const phone = isPhone();
+  /* On a phone the three totals ride on the sub-tabs instead (the amount sits in
+     each section's heading), and only the chosen section is built. */
+  const settledN = invs.filter((inv) => invoiceStatus(inv) === "paid").length;
+  const tabs = [
+    { id: "send", label: "To send", n: drafts.length },
+    { id: "owed", label: "Get paid", n: owing.length, alert: overdue.length > 0 },
+    { id: "paid", label: "Paid", n: settledN },
+  ];
+  // Opens on whatever needs doing: money owed, then invoices to send.
+  const def = owing.length ? "owed" : drafts.length ? "send" : "paid";
+  const sub = subOf("invoices", tabs, def);
+  const want = (k) => !phone || sub === k;
+
+  let html = phone ? subTabs("invoices", tabs, def) : '<div class="stat-trio">' +
     trio("Not sent yet", money0(sum(drafts)), "you control this", drafts.length ? "amber" : "") +
     trio("Waiting", money0(sum(waiting)), "sent, not paid yet", "") +
     trio("Overdue", money0(sum(overdue)), "past the due date", overdue.length ? "red" : "") +
     "</div>";
 
-  html += '<div class="btn-row">' +
+  html += '<div class="btn-row' + (phone && invs.length ? " three" : "") + '">' +
     '<button class="btn btn-primary" data-act="new-invoice">New invoice</button>' +
     /* Money that arrived without an invoice - a cash gig, a past job, a deposit -
        still belongs in the year's total. It is logged here rather than requiring
@@ -4671,82 +4879,90 @@ VIEWS.invoices = function () {
 
   /* ---- saved but not sent ---- */
   const draftValue = drafts.reduce((sum, inv) => sum + invoiceTotals(inv).total, 0);
-  html += '<h2 class="section-head">Not sent yet' +
-    (drafts.length ? ' <span class="count">' + money(draftValue) + " across " + drafts.length +
-      " invoice" + (drafts.length === 1 ? "" : "s") + "</span>" : "") + "</h2>";
+  if (want("send")) {
+    html += '<h2 class="section-head">Not sent yet' +
+      (drafts.length ? ' <span class="count">' + money(draftValue) + " across " + drafts.length +
+        " invoice" + (drafts.length === 1 ? "" : "s") + "</span>" : "") + "</h2>";
 
-  if (!drafts.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
-      "Nothing waiting to go out. Every invoice you've written has been sent.</p></div>";
-  } else {
-    drafts.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
-      const value = invoiceTotals(inv).total;
-      html += '<div class="paycard tone-amber">' +
-        '<div class="paycard-head"><span class="paycard-who">' +
-        esc(clientName(inv.clientId)) + "</span>" +
-        '<span class="pill pill-gray">' + esc(inv.number) + "</span>" +
-        '<span class="paycard-amt">' + money(value) + "</span></div>" +
-        '<p class="paycard-note" style="margin-top:8px">Written ' +
-        esc(fmtDate(inv.issueDate)) + " \u00b7 not sent to the client yet.</p>" +
-        '<div class="paycard-actions">' +
-        '<button class="btn btn-sm btn-primary" data-act="preview-invoice" data-id="' + inv.id + '">View / PDF</button>' +
-        '<button class="btn btn-sm" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
-        '<button class="btn btn-sm" data-act="draft-gmail" data-id="' + inv.id + '">Draft email</button>' +
-        '<button class="btn btn-sm" data-act="mark-sent" data-id="' + inv.id + '">Mark as sent</button>' +
-        "</div></div>";
-    });
+    if (!drafts.length) {
+      html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
+        "Nothing waiting to go out. Every invoice you've written has been sent.</p></div>";
+    } else {
+      drafts.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
+        const value = invoiceTotals(inv).total;
+        html += '<div class="paycard tone-amber">' +
+          '<div class="paycard-head"><span class="paycard-who">' +
+          esc(clientName(inv.clientId)) + "</span>" +
+          '<span class="pill pill-gray">' + esc(inv.number) + "</span>" +
+          '<span class="paycard-amt">' + money(value) + "</span></div>" +
+          '<p class="paycard-note" style="margin-top:8px">Written ' +
+          esc(fmtDate(inv.issueDate)) + " \u00b7 not sent to the client yet.</p>" +
+          '<div class="paycard-actions">' +
+          '<button class="btn btn-sm btn-primary" data-act="preview-invoice" data-id="' + inv.id + '">View / PDF</button>' +
+          '<button class="btn btn-sm" data-act="open-invoice" data-id="' + inv.id + '">Edit</button>' +
+          '<button class="btn btn-sm" data-act="draft-gmail" data-id="' + inv.id + '">Draft email</button>' +
+          '<button class="btn btn-sm" data-act="mark-sent" data-id="' + inv.id + '">Mark as sent</button>' +
+          "</div></div>";
+      });
+    }
   }
 
   const totalOwed = owing.reduce((s, inv) => s + (invoiceTotals(inv).total - invoicePaid(inv)), 0);
-  html += '<h2 class="section-head">Get paid' +
-    (owing.length ? ' <span class="count">' + money(totalOwed) + " across " + groups.size +
-      " client" + (groups.size === 1 ? "" : "s") + "</span>" : "") + "</h2>";
+  if (want("owed")) {
+    html += '<h2 class="section-head">Get paid' +
+      (owing.length ? ' <span class="count">' + money(totalOwed) + " across " + groups.size +
+        " client" + (groups.size === 1 ? "" : "s") + "</span>" : "") + "</h2>";
 
-  if (!owing.length) {
-    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
-      "Nothing outstanding. Everything you've sent has been paid.</p></div>";
-  } else {
-    Array.from(groups.values())
-      .sort((a, b) => b.total - a.total)
-      .forEach((g) => {
-        const unsent = g.rows.filter((inv) => invoiceStatus(inv) === "draft").length;
-        const late = g.rows.some((inv) => invoiceStatus(inv) === "overdue");
-        html += '<div class="paycard ' + (late ? "tone-red" : unsent ? "tone-amber" : "tone-green") + '">' +
-          '<div class="paycard-head"><span class="paycard-who">' +
-          esc(g.client ? g.client.name : "No client set") + "</span>" +
-          (unsent ? '<span class="pill pill-amber">' + unsent + " not sent</span>" : "") +
-          '<span class="paycard-amt">' + money(g.total) + "</span></div>";
+    if (!owing.length) {
+      html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
+        "Nothing outstanding. Everything you've sent has been paid.</p></div>";
+    } else {
+      Array.from(groups.values())
+        .sort((a, b) => b.total - a.total)
+        .forEach((g) => {
+          const unsent = g.rows.filter((inv) => invoiceStatus(inv) === "draft").length;
+          const late = g.rows.some((inv) => invoiceStatus(inv) === "overdue");
+          html += '<div class="paycard ' + (late ? "tone-red" : unsent ? "tone-amber" : "tone-green") + '">' +
+            '<div class="paycard-head"><span class="paycard-who">' +
+            esc(g.client ? g.client.name : "No client set") + "</span>" +
+            (unsent ? '<span class="pill pill-amber">' + unsent + " not sent</span>" : "") +
+            '<span class="paycard-amt">' + money(g.total) + "</span></div>";
 
-        g.rows.forEach((inv) => {
-          const st = invoiceStatus(inv);
-          html += '<div class="payrow">' +
-            '<span class="payrow-no">' + esc(inv.number) + "</span>" +
-            '<span class="pill ' + STATUS_PILL[st] + '">' + st + "</span>" +
-            '<span class="payrow-amt">' + money(invoiceTotals(inv).total - invoicePaid(inv)) + "</span>" +
-            '<button class="btn btn-sm" data-act="preview-invoice" data-id="' + inv.id + '">Open</button>' +
+          g.rows.forEach((inv) => {
+            const st = invoiceStatus(inv);
+            html += '<div class="payrow">' +
+              '<span class="payrow-no">' + esc(inv.number) + "</span>" +
+              '<span class="pill ' + STATUS_PILL[st] + '">' + st + "</span>" +
+              '<span class="payrow-amt">' + money(invoiceTotals(inv).total - invoicePaid(inv)) + "</span>" +
+              '<button class="btn btn-sm" data-act="preview-invoice" data-id="' + inv.id + '">Open</button>' +
+              "</div>";
+          });
+
+          const first = g.rows[0];
+          html += '<div class="paycard-actions">' +
+            (g.client && g.client.email
+              ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft email</button>'
+              : '<button class="btn btn-sm" data-act="edit-client-of" data-id="' + first.id + '">Add an email</button>') +
+            '<button class="btn btn-sm" data-act="save-pdf" data-id="' + first.id + '">PDF</button>' +
+            '<button class="btn btn-sm" data-act="mark-paid" data-id="' + first.id + '">Record payment</button>' +
             "</div>";
+
+          if (!(g.client && g.client.email)) {
+            html += '<p class="paycard-note">No email on file \u2014 that\u2019s the only thing between you and ' +
+              money(g.total) + ".</p>";
+          }
+          html += "</div>";
         });
-
-        const first = g.rows[0];
-        html += '<div class="paycard-actions">' +
-          (g.client && g.client.email
-            ? '<button class="btn btn-sm btn-primary" data-act="draft-gmail" data-id="' + first.id + '">Draft email</button>'
-            : '<button class="btn btn-sm" data-act="edit-client-of" data-id="' + first.id + '">Add an email</button>') +
-          '<button class="btn btn-sm" data-act="save-pdf" data-id="' + first.id + '">PDF</button>' +
-          '<button class="btn btn-sm" data-act="mark-paid" data-id="' + first.id + '">Record payment</button>' +
-          "</div>";
-
-        if (!(g.client && g.client.email)) {
-          html += '<p class="paycard-note">No email on file \u2014 that\u2019s the only thing between you and ' +
-            money(g.total) + ".</p>";
-        }
-        html += "</div>";
-      });
+    }
   }
 
   /* ---- everything else, compact ---- */
   const settled = invs.filter((inv) => invoiceStatus(inv) === "paid");
-  if (settled.length) {
+  if (phone && sub === "paid" && !settled.length) {
+    html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
+      "Nothing paid yet. Invoices land here once they're settled.</p></div>";
+  }
+  if (settled.length && want("paid")) {
     html += '<h2 class="section-head">Paid <span class="count">' + settled.length + "</span></h2>";
     settled.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
       html += '<div class="listrow" data-act="preview-invoice" data-id="' + inv.id + '">' +
@@ -5673,6 +5889,7 @@ VIEWS.outreach = function () {
   const today = todayISO();
   const due = rows.filter((r) => r.nextFollowUp && r.nextFollowUp <= today &&
     !["booked", "passed"].includes(r.status));
+  if (isPhone()) return outreachPhone(rows, today);
 
   let html = '<div class="stat-trio">' +
     trio("To contact", count("to-contact"), "warm leads first", count("to-contact") ? "amber" : "") +
@@ -5710,6 +5927,161 @@ VIEWS.outreach = function () {
   html += mode === "list" ? outreachList(rows, today) : outreachLineups(rows);
   return html;
 };
+
+/* Outreach on a phone, one section at a time. The tabs are the three reasons Kevin
+   opens it (2026-10-02): a particular lineup, who to email next, and who to chase.
+   "All" is the whole pipeline, as the desktop's List shows it. */
+function outreachPhone(rows, today) {
+  const next = emailNextRows(rows);
+  const fu = followUpRows(rows, today);
+  const needs = fu.filter((r) => followRank(r, today) < 2).length;
+  const tabs = [
+    { id: "lineups", label: "Lineups" },
+    // Counted only when there's something to finish: drafts you haven't marked sent.
+    { id: "next", label: "Email next", n: next.filter((r) => r.draftedAt).length, alert: true },
+    { id: "follow", label: "Follow up", n: needs, alert: needs > 0 },
+    { id: "all", label: "All" },
+  ];
+  const sub = subOf("outreach", tabs);
+  let html = subTabs("outreach", tabs);
+  if (sub === "lineups") {
+    html += '<div class="btn-row three">' +
+      '<button class="btn" data-act="goto" data-view="settings">✉ Template</button>' +
+      '<button class="btn" data-act="import-lineup">＋ Lineup</button>' +
+      '<button class="btn btn-primary" data-act="new-outreach">＋ Add</button></div>' +
+      outreachLineups(rows);
+  } else if (sub === "next") {
+    html += emailNextHTML(next);
+  } else if (sub === "follow") {
+    html += followUpHTML(fu, today);
+  } else {
+    html += '<div class="btn-row"><button class="btn btn-primary" data-act="new-outreach">＋ Add someone</button></div>' +
+      outreachList(rows, today);
+  }
+  return html;
+}
+
+/* Everyone with an address you haven't written to, across every lineup, once each.
+   Drafted-but-not-sent go first (finish those), then the smallest following first:
+   Jay's research is that the bottom of the bill answers its mail and the top routes
+   everything through a link page. Acts with no count on file go last. */
+function emailNextRows(rows) {
+  const seen = new Set();
+  const out = [];
+  const add = (r) => {
+    const k = akey(r.venue);
+    if (!k || seen.has(k) || !r.email || r.status !== "to-contact") return;
+    seen.add(k);
+    out.push(r);
+  };
+  Object.keys(window.ARTIST_FESTIVALS || {}).sort((a, b) => a.localeCompare(b))
+    .forEach((f) => lineupRows(f, rows).forEach(add));
+  rows.forEach(add);                       // venues, and lineups you added by hand
+  const fo = (r) => { const f = followersOf(r.venue); return f == null ? Infinity : f; };
+  return out.sort((a, b) => (b.draftedAt ? 1 : 0) - (a.draftedAt ? 1 : 0) || fo(a) - fo(b) ||
+    (a.venue || "").localeCompare(b.venue || ""));
+}
+
+const NEXT_PAGE = 30;
+
+function nxRow(r, action) {
+  const f = followersOf(r.venue);
+  return '<div class="nx-row"><div class="nx-main">' +
+    '<div class="nx-name">' + esc(r.venue || "—") +
+    (f != null ? ' <span class="pick-fo' + (f < 50000 ? " small" : "") + '">' + fmtFollowers(f) + "</span>" : "") + "</div>" +
+    '<div class="nx-sub">' + esc([r.festival, r.email].filter(Boolean).join(" · ")) + "</div></div>" +
+    action + "</div>";
+}
+
+function emailNextHTML(next) {
+  if (!next.length) {
+    return '<div class="card empty"><h3>Nobody left to write to</h3>' +
+      "<p>Everyone with an address on file has been contacted. Acts with no address are under All, " +
+      "in each lineup’s “No email” filter.</p></div>";
+  }
+  const drafted = next.filter((r) => r.draftedAt);
+  const fresh = next.filter((r) => !r.draftedAt);
+  const shown = state.nextShown || NEXT_PAGE;
+  let html = "";
+  if (drafted.length) {
+    html += '<h2 class="section-head">Drafted, not sent <span class="count">' + drafted.length + "</span></h2>" +
+      '<p class="fold-intro">Opened in Gmail, not marked as sent yet. Once one has gone, tick it off.</p>' +
+      '<div class="card nx-list">' + drafted.map((r) => nxRow(r,
+        '<button class="btn btn-sm" data-act="outreach-sent" data-id="' + esc(r.id) + '">Sent ✓</button>')).join("") +
+      "</div>";
+  }
+  if (fresh.length) {
+    html += '<h2 class="section-head">Up next <span class="count">' + fresh.length + "</span></h2>" +
+      '<p class="fold-intro">Smallest following first: they’re the most likely to write back.</p>' +
+      '<div class="card nx-list">' + fresh.slice(0, shown).map((r) => nxRow(r, r.festival
+        ? '<button class="btn btn-sm btn-primary" data-act="draft-one" data-id="' + esc(r.id) +
+          '" data-fest="' + esc(r.festival) + '">✉ Draft</button>'
+        : '<button class="btn btn-sm" data-act="edit-outreach" data-id="' + esc(r.id) + '">Open</button>')).join("") +
+      "</div>" +
+      (fresh.length > shown
+        ? '<button class="btn nx-more" data-act="next-more">Show ' + Math.min(NEXT_PAGE, fresh.length - shown) +
+          " more</button>"
+        : "");
+  }
+  return html;
+}
+
+/* Where someone you've written to stands: 0 they replied, 1 a follow-up is due,
+   2 a follow-up is set for later, 3 just waiting. */
+function followRank(r, today) {
+  return r.status === "replied" ? 0
+    : r.nextFollowUp && r.nextFollowUp <= today ? 1
+    : r.nextFollowUp ? 2 : 3;
+}
+
+// Everyone written to who hasn't booked or passed, most in need of you first.
+function followUpRows(rows, today) {
+  return rows.filter((r) => ["contacted", "follow-up", "replied"].includes(r.status))
+    .sort((a, b) => {
+      const ra = followRank(a, today), rb = followRank(b, today);
+      if (ra !== rb) return ra - rb;
+      // Follow-ups by their date; everyone else by how long they've been quiet.
+      const ka = ra === 1 || ra === 2 ? a.nextFollowUp : a.lastContact || "";
+      const kb = rb === 1 || rb === 2 ? b.nextFollowUp : b.lastContact || "";
+      return ka.localeCompare(kb) || (a.venue || "").localeCompare(b.venue || "");
+    });
+}
+
+function followUpHTML(fu, today) {
+  if (!fu.length) {
+    return '<div class="card empty"><h3>Nobody to chase</h3>' +
+      "<p>Once you’ve emailed someone they wait here until they reply, book or pass.</p></div>";
+  }
+  const short = (d) => esc(fmtDate(d, { month: "short", day: "numeric" }));
+  const row = (r) => {
+    // The dates first: they're what this list is for. The heading already says the status.
+    const due = followRank(r, today) === 1;
+    const bits = [];
+    if (r.nextFollowUp) {
+      bits.push(due ? '<strong class="due">follow up ' + short(r.nextFollowUp) + "</strong>"
+        : "follow up " + short(r.nextFollowUp));
+    }
+    if (r.lastContact) bits.push("contacted " + short(r.lastContact));
+    if (r.festival) bits.push(esc(r.festival));
+    return '<button class="nx-row" data-act="edit-outreach" data-id="' + esc(r.id) + '">' +
+      '<span class="nx-main"><span class="nx-name">' + esc(r.venue || "—") + "</span>" +
+      '<span class="nx-sub">' + bits.join(" · ") + "</span></span>" +
+      '<span class="nx-go" aria-hidden="true">›</span></button>';
+  };
+  const groups = [
+    { rank: 0, head: "They replied" },
+    { rank: 1, head: "Follow up now" },
+    { rank: 2, head: "Follow-up set" },
+    { rank: 3, head: "Waiting on a reply" },
+  ];
+  return groups.map((g) => {
+    const list = fu.filter((r) => followRank(r, today) === g.rank);
+    return list.length
+      ? '<h2 class="section-head">' + g.head + ' <span class="count">' + list.length + "</span></h2>" +
+        '<div class="card nx-list">' + list.map(row).join("") + "</div>"
+      : "";
+  }).join("");
+}
 
 /* ---------- getting the database into the app ----------
    It is NOT a file next to the page: this site is served from a public GitHub repo, so
@@ -6092,7 +6464,7 @@ function outreachLineups(rows) {
   const openFests = state.openLineups || (state.openLineups = {});
   let html = '<div class="agenda-tools">' +
     '<span class="muted">' + groups.size + " lineup" + (groups.size === 1 ? "" : "s") + "</span>" +
-    '<button class="btn btn-sm" data-act="lineups-all" data-open="1">Expand all</button>' +
+    (isPhone() ? "" : '<button class="btn btn-sm" data-act="lineups-all" data-open="1">Expand all</button>') +
     '<button class="btn btn-sm" data-act="lineups-all" data-open="">Collapse all</button></div>';
 
   Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
@@ -7055,25 +7427,26 @@ document.addEventListener("click", (e) => {
     return;
   }
   if (act === "local-day") {
-    // Clicking a show inside the cell opens that show; clicking the day itself
-    // opens the day. Toggling on the same day closes it again.
-    if (e.target === el || e.target.classList.contains("cal-date")) {
-      const d = el.dataset.date;
-      state.eventDay = state.eventDay === d ? null : d;
-      render();
-      /* The panel sits under a six-row grid, so on most screens it opens below the
-         fold and the click looks like it did nothing. Only scroll when it actually
-         isn't in view — otherwise the page lurches on every day you try. */
-      if (state.eventDay) {
-        const panel = $(".daypanel");
-        if (panel) {
-          const r = panel.getBoundingClientRect();
-          // Instant, not smooth: render() has just restored scroll position with an
-          // instant scrollTo, and an animation starting from there fights it. Smooth
-          // scrolling is also simply ignored in some environments.
-          if (r.bottom > window.innerHeight - 8) panel.scrollIntoView({ block: "nearest" });
-        }
-      }
+    // Clicking a show inside the cell opens that show (its own data-act); anywhere
+    // else in the day - the date, the count, "+2 more" - opens the day. Toggling on
+    // the same day closes it again, except on a phone, where one day is always open.
+    const d = el.dataset.date;
+    state.eventDay = state.eventDay === d && !isPhone() ? null : d;
+    render();
+    /* The panel sits under a six-row grid, so on most screens it opens below the
+       fold and the click looks like it did nothing. Only scroll when it actually
+       isn't in view — otherwise the page lurches on every day you try. */
+    const panel = state.eventDay && $(".daypanel");
+    if (panel) {
+      const r = panel.getBoundingClientRect();
+      // Instant, not smooth: render() has just restored scroll position with an
+      // instant scrollTo, and an animation starting from there fights it. Smooth
+      // scrolling is also simply ignored in some environments.
+      if (isPhone()) {
+        // A phone brings the day's list up to a third of the way down, so the
+        // shows are readable and the bottom of the month is still there to tap.
+        if (r.top > window.innerHeight * 0.55) window.scrollBy(0, r.top - window.innerHeight * 0.33);
+      } else if (r.bottom > window.innerHeight - 8) panel.scrollIntoView({ block: "nearest" });
     }
     return;
   }
@@ -7290,7 +7663,16 @@ document.addEventListener("click", (e) => {
       break;
     case "quick-client": quickClient(); break;
 
-    case "cal-mode": state.calMode = el.dataset.mode; render(); break;
+    case "sub":
+      // A different section is a different page: start it at the top.
+      state.sub = state.sub || {};
+      state.sub[el.dataset.view] = el.dataset.sub;
+      switchingTab = true; render(); switchingTab = false;
+      break;
+    case "cal-mode":
+      state.calMode = el.dataset.mode;
+      if (isPhone()) { switchingTab = true; render(); switchingTab = false; } else render();
+      break;
     case "event-kind": state.eventKind = el.dataset.key; render(); break;
     case "close-day": state.eventDay = null; render(); break;
     case "event-view": state.eventView = el.dataset.mode; render(); break;
@@ -7338,6 +7720,23 @@ document.addEventListener("click", (e) => {
 
     case "outreach-filter": state.outreachFilter = el.dataset.key; render(); break;
     case "outreach-mode": state.outreachMode = el.dataset.mode; render(); break;
+    case "draft-one":
+      // One act from Email next, through the same path as a lineup's picks.
+      state.picked = {};
+      state.picked[id] = true;
+      draftEach(el.dataset.fest);
+      break;
+    case "outreach-sent": {
+      const r = (DB.outreach || []).find((x) => x.id === id);
+      if (r && r.status === "to-contact") {
+        r.status = "contacted";
+        r.lastContact = todayISO();
+        save();
+        render();
+      }
+      break;
+    }
+    case "next-more": state.nextShown = (state.nextShown || NEXT_PAGE) + NEXT_PAGE; render(); break;
     case "toggle-gig-paid": toggleGigPaid(id, el.checked); break;
     case "add-poster": closeModal(); addPoster(el.dataset.fest); break;
     case "view-poster": viewPoster(el.dataset.fest); break;
@@ -7447,6 +7846,8 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.id === "todo-input") { e.preventDefault(); addTodo(); return; }
+  // The results are already showing; Search on a phone keyboard just puts it away.
+  if (e.key === "Enter" && e.target.id === "ev-search") { e.target.blur(); return; }
   if (e.key === "Escape" && $(".levelup")) { $(".levelup").click(); return; }
   if (e.key === "Escape" && $(".modal-backdrop")) closeModal();
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -7458,6 +7859,12 @@ document.addEventListener("keydown", (e) => {
 // Typing in the closet's search box looks items up as you go.
 document.addEventListener("input", (e) => {
   if (e.target && e.target.id === "closet-q") closetSearch(e.target.value);
+  // Local Events on a phone: only the results under the box are redrawn, so it keeps focus.
+  if (e.target && e.target.id === "ev-search") {
+    state.eventSearch = e.target.value;
+    const body = $("#ev-body");
+    if (body) body.innerHTML = eventsBody();
+  }
 });
 
 /* A live sprite that won't load tries its plainer pose, then shows the drawn one.
