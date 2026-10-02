@@ -104,7 +104,8 @@ let app = read("app.js").replace(
   "  mobFor, MOBS, MOB_SPRITES, mobSVG, VIEWS, CHANGELOG, assignTop,\n" +
   "  STATS, PRIORITIES, statSheet, streakMult, statLevel, guessStat, statOf, prioOf, earnedXP,\n" +
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
-  "  heroTitle, addDays,\n" +
+  "  heroTitle, addDays, avatarOf, avatarItems, avatarURL, weaponActions, closetBase, closetName,\n" +
+  "  closetWear, AVATAR_DEFAULT,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1290,6 +1291,65 @@ t("Today shows all five stats; Personal shows only loot you've found", () => {
   eq(T.heroTitle(), "Inbox Slayer");
   db.game.loot.equip.title = "t-maincharacter";
   eq(T.heroTitle(), "", "a title you don't own can't be worn");
+});
+
+/* ---------- the real MapleStory character ---------- */
+
+t("a hero with nothing saved is a Beginner in real game items", () => {
+  eq(T.avatarItems(T.avatarOf({})).join(), "2000,12000,20000,30000,1040002,1060002,1072001,1302000");
+});
+
+t("an old pixel hero keeps their skin, hair colour and weapon", () => {
+  const a = T.avatarOf({ skin: 4, hairColor: 2, hairStyle: "spiky", weapon: "staff" });
+  eq(a.skin, 2002, "deep skin to dark"); eq(a.hair, 30033, "spiky, blonde"); eq(a.gear.Weapon, 1382000, "a staff");
+});
+
+t("a saved outfit is used exactly as saved", () => {
+  const a = T.avatarOf({ weapon: "axe", avatar: { skin: 2001, face: 21000, hair: 31005, gear: { Hat: 1002080 } } });
+  eq(a.gear.Hat, 1002080); eq(a.gear.Weapon, undefined, "old fields don't leak into a saved outfit");
+  eq(T.avatarItems(a).slice(0, 4).join(), "2001,12001,21000,31005", "head matches the skin");
+});
+
+t("an overall replaces the top and bottom, and a top replaces an overall", () => {
+  const d = { gear: { Top: 1040002, Bottom: 1060002 } };
+  T.closetWear(d, "Overall", 1052000);
+  eq(Object.keys(d.gear).join(), "Overall");
+  T.closetWear(d, "Top", 1040002);
+  eq(Object.keys(d.gear).join(), "Top");
+  T.closetWear(d, "Top", null);
+  eq(Object.keys(d.gear).length, 0, "taking it off empties the slot");
+});
+
+t("the render address lists every item on one fixed canvas", () => {
+  const a = T.avatarOf({});
+  const url = decodeURIComponent(T.avatarURL(a, "stand1"));
+  T.avatarItems(a).forEach((id) => { if (url.indexOf('"itemId":' + id + ",") < 0) throw new Error("missing item " + id); });
+  if (url.indexOf("/stand1/animated?renderMode=1") < 0) throw new Error("wrong pose or canvas: " + url.slice(-40));
+  if (decodeURIComponent(T.avatarURL(a, "swingO1", 2)).indexOf("/swingO1/2?") < 0) throw new Error("frame not used");
+});
+
+t("two-handed weapons stand and swing two-handed; bows shoot", () => {
+  eq(T.weaponActions(1402039).stand, "stand2"); eq(T.weaponActions(1402039).attack, "swingT1");
+  eq(T.weaponActions(1302000).attack, "swingO1");
+  eq(T.weaponActions(1452002).attack, "shoot1");
+  eq(T.weaponActions(undefined).stand, "stand1", "bare hands");
+});
+
+t("the closet lists each hair and face once, whatever its colour", () => {
+  eq(T.closetBase("Hair", 30035), 30030); eq(T.closetBase("Face", 20312), 20012);
+  eq(T.closetBase("Hat", 1002080), 1002080, "gear is never folded");
+  eq(T.closetName("Hair", "Blue Metro"), "Metro");
+  eq(T.closetName("Face", "Motivated Look (Black)"), "Motivated Look");
+});
+
+t("every monster carries the game's own id, once", () => {
+  const ids = new Set();
+  T.MOBS.forEach((m) => {
+    if (!(m.id > 0)) throw new Error(m.name + " has no id");
+    if (ids.has(m.id)) throw new Error("duplicate id " + m.id);
+    ids.add(m.id);
+  });
+  eq(T.MOBS[6].name, "Stump", "picks are saved by position, so the first eight keep their places");
 });
 
 /* ---------- report ---------- */

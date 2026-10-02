@@ -868,9 +868,13 @@ const TAB_OF = { income: "money", expenses: "money", gigs: "calendar", clients: 
 function statusBarHTML() {
   const g = gameStats();
   const pct = g.xpIntoLevel / g.xpPerLevel * 100;
+  // The level in the game's own yellow digits; the alt text keeps it if they can't load.
+  const digits = String(g.level).split("").map((d) =>
+    '<img src="' + msWz("UI/StatusBar2.img/mainBar/lvNumber/" + d) + '" alt="' + d + '">').join("");
   return '<div class="sb-exp">' +
-    '<span class="sb-lv" title="Hero level: every stat added together">Lv.' + g.level + "</span>" +
+    '<span class="sb-lv" title="Hero level: every stat added together"><span class="lv-label">LV.</span>' + digits + "</span>" +
     '<span class="sb-name">' + esc(heroName(heroOf())) + "</span>" +
+    '<span class="sb-label" aria-hidden="true">EXP.</span>' +
     '<span class="sb-gauge meter-xp" role="progressbar" aria-label="EXP toward level ' + (g.level + 1) +
       '" aria-valuemin="0" aria-valuemax="' + g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '">' +
       '<span class="meter-fill" style="width:' + pct.toFixed(2) + '%"></span>' +
@@ -2044,20 +2048,29 @@ const MOB_COLOURS = {
   P: "#FFB8CB", p: "#FF86A6", n: "#F07A9C",
 };
 
-/* The monsters you can meet, weakest first. `face` is the colour under the eyes,
-   so closed eyes leave skin behind rather than a hole. Left on "changes daily",
-   each day brings a different one. */
+/* The monsters you can meet. `id` is the game's own, for the live sprite; the
+   drawn sprite, palette and `face` (the colour under the eyes) are the fallback.
+   Picks are saved by position, so new monsters go on the end. Left on "changes
+   daily", each day brings a different one. */
 const MOBS = [
-  { name: "Snail", sprite: "snail", level: 1, face: "B", pal: { S: "#7BCB4F", s: "#438F2A" } },
-  { name: "Blue Snail", sprite: "snail", level: 2, face: "B", pal: { S: "#5AA8FF", s: "#2F66C9" } },
-  { name: "Red Snail", sprite: "snail", level: 4, face: "B", pal: { S: "#FF6A55", s: "#B9352A" } },
-  { name: "Slime", sprite: "slime", level: 6, face: "G", pal: { G: "#5FD6B0", g: "#2F9C7E" } },
-  { name: "Pig", sprite: "pig", level: 7, face: "P", pal: {} },
-  { name: "Orange Mushroom", sprite: "mushroom", level: 8, face: "T",
+  { id: 100100, name: "Snail", sprite: "snail", level: 1, face: "B", pal: { S: "#7BCB4F", s: "#438F2A" } },
+  { id: 100101, name: "Blue Snail", sprite: "snail", level: 2, face: "B", pal: { S: "#5AA8FF", s: "#2F66C9" } },
+  { id: 130101, name: "Red Snail", sprite: "snail", level: 4, face: "B", pal: { S: "#FF6A55", s: "#B9352A" } },
+  { id: 210100, name: "Slime", sprite: "slime", level: 6, face: "G", pal: { G: "#5FD6B0", g: "#2F9C7E" } },
+  { id: 1210100, name: "Pig", sprite: "pig", level: 7, face: "P", pal: {} },
+  { id: 1210102, name: "Orange Mushroom", sprite: "mushroom", level: 8, face: "T",
     pal: { O: "#FF9A2E", o: "#C95E10", d: "#E9751A", w: "#FFD9A6" } },
-  { name: "Stump", sprite: "stump", level: 9, face: "W", pal: { w: "#6A4222" } },
-  { name: "Blue Mushroom", sprite: "mushroom", level: 11, face: "T",
+  { id: 130100, name: "Stump", sprite: "stump", level: 4, face: "W", pal: { w: "#6A4222" } },
+  { id: 2220100, name: "Blue Mushroom", sprite: "mushroom", level: 20, face: "T",
     pal: { O: "#5FA4FF", o: "#2C62C4", d: "#447FE0", w: "#D6E8FF" } },
+  { id: 1210101, name: "Ribbon Pig", sprite: "pig", level: 10, face: "P", pal: { P: "#FFC2D4" } },
+  { id: 1110100, name: "Green Mushroom", sprite: "mushroom", level: 15, face: "T",
+    pal: { O: "#6CCB4A", o: "#3F8A2C", d: "#58B03A", w: "#D8F5C8" } },
+  { id: 1130100, name: "Axe Stump", sprite: "stump", level: 17, face: "W", pal: { w: "#5A3A1E", W: "#7A4A26" } },
+  { id: 2110200, name: "Horny Mushroom", sprite: "mushroom", level: 22, face: "T",
+    pal: { O: "#E8564A", o: "#A8261E", d: "#C83A30", w: "#FFD0C8" } },
+  { id: 3210100, name: "Fire Boar", sprite: "pig", level: 32, face: "P", pal: { P: "#E8705A", p: "#B8402E", n: "#8A2E1E" } },
+  { id: 4130100, name: "Copper Drake", sprite: "slime", level: 45, face: "G", pal: { G: "#D98A4A", g: "#9A5A2A" } },
 ];
 
 const HERO_OPTIONS = {
@@ -2225,20 +2238,10 @@ function heroWeaponSVG(h) {
     pixelRects(w.rows, heroPalette(h), 12 - w.gx, 9 - w.gy) + "</g>";
 }
 
-// Hero and monster side by side, for the customiser.
-function matchupPreview(h) {
-  const mob = mobFor(h, todayISO());
-  const rows = MOB_SPRITES[mob.sprite];
-  return '<svg class="hero-portrait" viewBox="-2 -7 42 25" shape-rendering="crispEdges" role="img" aria-label="' +
-    esc(heroName(h)) + " and a " + esc(mob.name) + '">' +
-    heroBodySVG(h) + heroWeaponSVG(h) + '<g transform="translate(' + (38 - rows[0].length) + " " +
-    (17 - rows.length) + ')">' + mobSVG(mob) + "</g></svg>";
-}
-
-// The hero on their own, for the Personal tab.
+// The hero on their own, standing on the current map, for the Personal tab.
 function heroPortrait(h) {
-  return '<svg class="hero-portrait" viewBox="-2 -7 22 25" shape-rendering="crispEdges" role="img" aria-label="' +
-    esc(heroName(h)) + ', your hero">' + heroBodySVG(h) + heroWeaponSVG(h) + "</svg>";
+  return '<div class="hero-portrait" role="img" aria-label="' + esc(heroName(h)) + ', your character">' +
+    heroSprite(h) + "</div>";
 }
 
 function mobOfDay(iso) {
@@ -2272,6 +2275,120 @@ function mobSVG(mob) {
     '<g class="mob-shut">' + shut + "</g>";
 }
 
+/* ============================================================
+   MAPLESTORY ART, LOADED LIVE
+   The monsters, your character, item icons, damage numbers and the town
+   backdrops come straight from maplestory.io, a long-running fan site that
+   serves the game's own files. None of the game's art is stored in this repo,
+   which is public. If the site can't be reached, each sprite falls back to the
+   hand-drawn one above.
+   ============================================================ */
+
+const MS_API = "https://maplestory.io/api";
+const MS_REGION = "GMS";
+const MS_VERSION = "95";            // GMS v0.95: the Big Bang era, 2010-2011
+const msURL = (path) => MS_API + "/" + MS_REGION + "/" + MS_VERSION + "/" + path;
+const msWz = (path) => MS_API + "/wz/img/" + MS_REGION + "/" + MS_VERSION + "/" + path;
+const mobImg = (mob, action) => msURL("mob/" + mob.id + "/render/" + action);
+const itemIcon = (id) => msURL("item/" + id + "/icon");
+
+/* Your character is a set of real item ids: skin, face, hair and whatever gear
+   is worn. An overall takes the place of a top and bottom. Hair and eye colour
+   are the last digit of the hair id and the hundreds digit of the face id. */
+const SKINS = [["Light", 2000, "#FFE2C8"], ["Tanned", 2001, "#D9A06A"], ["Dark", 2002, "#8A5A34"],
+               ["Pale", 2003, "#FFF4EC"], ["Ashen", 2004, "#D6DCE8"]];
+const HAIR_COLOURS = [["Black", 0, "#2B2420"], ["Red", 1, "#C8402E"], ["Orange", 2, "#E8892B"], ["Blonde", 3, "#E8C95A"],
+                      ["Green", 4, "#5DA03A"], ["Blue", 5, "#3B6FD0"], ["Purple", 6, "#8A4FC4"], ["Brown", 7, "#7A4A26"]];
+const EYE_COLOURS = [["Black", 0, "#2B2420"], ["Blue", 1, "#3B6FD0"], ["Red", 2, "#C8402E"], ["Green", 3, "#3E9A4A"],
+                     ["Hazel", 4, "#9A6A2E"], ["Sapphire", 5, "#2E8FC8"], ["Violet", 6, "#7A4FC4"], ["Amethyst", 7, "#B05FC8"]];
+const GEAR_SLOTS = [
+  { key: "Hat", label: "Hat", filters: ["subCategoryFilter=Hat"] },
+  { key: "Top", label: "Top", filters: ["subCategoryFilter=Top"] },
+  { key: "Bottom", label: "Bottom", filters: ["subCategoryFilter=Bottom"] },
+  { key: "Overall", label: "Overall", filters: ["subCategoryFilter=Overall"] },
+  { key: "Shoes", label: "Shoes", filters: ["subCategoryFilter=Shoes"] },
+  { key: "Glove", label: "Gloves", filters: ["subCategoryFilter=Glove"] },
+  { key: "Cape", label: "Cape", filters: ["subCategoryFilter=Cape"] },
+  { key: "Weapon", label: "Weapon", filters: ["categoryFilter=One-Handed Weapon", "categoryFilter=Two-Handed Weapon"] },
+  { key: "Shield", label: "Shield", filters: ["subCategoryFilter=Shield"] },
+  { key: "FaceAcc", label: "Face acc.", filters: ["subCategoryFilter=Face Accessory"] },
+  { key: "EyeAcc", label: "Eye acc.", filters: ["subCategoryFilter=Eye Decoration"] },
+  { key: "Earrings", label: "Earrings", filters: ["subCategoryFilter=Earrings"] },
+];
+// A fresh Beginner: white undershirt, blue jean shorts, red rubber boots, a sword.
+const AVATAR_DEFAULT = { skin: 2000, face: 20000, hair: 30000,
+                         gear: { Top: 1040002, Bottom: 1060002, Shoes: 1072001, Weapon: 1302000 } };
+
+// Heroes made before the real art keep what carries over: skin, hair and weapon.
+const OLD_SKIN = [2003, 2000, 2001, 2001, 2002];
+const OLD_HAIR = { short: 30000, long: 30020, spiky: 30030 };
+const OLD_HAIR_COLOUR = [0, 7, 3, 1, 5, 0];
+const OLD_WEAPON = { sword: 1302000, axe: 1312004, staff: 1382000, hammer: 1322005 };
+
+function avatarOf(h) {
+  const hero = h || heroOf();
+  const a = hero.avatar;
+  if (a && a.skin) {
+    return { skin: num(a.skin) || 2000, face: num(a.face) || 20000, hair: num(a.hair) || 30000,
+             gear: Object.assign({}, a.gear || {}) };
+  }
+  const av = JSON.parse(JSON.stringify(AVATAR_DEFAULT));
+  if (OLD_SKIN[hero.skin]) av.skin = OLD_SKIN[hero.skin];
+  av.hair = (OLD_HAIR[hero.hairStyle] || 30000) + (OLD_HAIR_COLOUR[hero.hairColor] || 0);
+  if (OLD_WEAPON[hero.weapon]) av.gear.Weapon = OLD_WEAPON[hero.weapon];
+  return av;
+}
+
+function avatarItems(av) {
+  const ids = [av.skin, av.skin + 10000, av.face, av.hair];
+  GEAR_SLOTS.forEach((s) => { if (av.gear[s.key]) ids.push(num(av.gear[s.key])); });
+  return ids;
+}
+
+// The weapon decides how the character stands and attacks.
+function weaponActions(id) {
+  const type = Math.floor(num(id) / 10000);
+  if (type >= 140 && type <= 144) return { stand: "stand2", attack: "swingT1" };
+  if (type === 145) return { stand: "stand1", attack: "shoot1" };
+  if (type === 146) return { stand: "stand2", attack: "shoot2" };
+  return { stand: "stand1", attack: "swingO1" };
+}
+
+/* One render of the character. renderMode=1 draws every pose on the same 96 x 96
+   canvas, so switching from standing to swinging doesn't make them jump. */
+function avatarURL(av, action, frame) {
+  return MS_API + "/character/" + avatarItems(av).map((id) =>
+    encodeURIComponent(JSON.stringify({ itemId: id, region: MS_REGION, version: MS_VERSION }))).join(",") +
+    "/" + action + "/" + (frame === undefined ? "animated" : frame) + "?renderMode=1";
+}
+
+/* A live sprite with the hand-drawn one tucked behind it. If the live image won't
+   load it tries `alt` (a plainer pose), then gives way to the drawing. */
+function spriteHTML(cls, src, alt, drawing, viewBox) {
+  return '<span class="sprite ' + cls + '"><img class="ms-img" src="' + esc(src) + '"' +
+    (alt ? ' data-alt="' + esc(alt) + '"' : "") + ' alt="" decoding="async">' +
+    '<svg class="sprite-fallback" viewBox="' + viewBox + '" shape-rendering="crispEdges" aria-hidden="true">' +
+    drawing + "</svg></span>";
+}
+
+function heroSprite(h, cls, av) {
+  const a = av || avatarOf(h);
+  return spriteHTML("hero-sprite" + (cls ? " " + cls : ""), avatarURL(a, weaponActions(a.gear.Weapon).stand),
+    avatarURL(a, "stand1"), heroBodySVG(h) + heroWeaponSVG(h), "-2 -7 22 25");
+}
+
+function mobSprite(mob, cls) {
+  const rows = MOB_SPRITES[mob.sprite];
+  return spriteHTML("mob-sprite" + (cls ? " " + cls : ""), mobImg(mob, "stand"), "", mobSVG(mob),
+    "-1 -1 " + (rows[0].length + 2) + " " + (rows.length + 2));
+}
+
+// Damage in the game's own digits. The alt text keeps the number if they can't load.
+function damageDigits(n) {
+  return String(Math.max(0, Math.round(n))).split("").map((d) =>
+    '<img src="' + msWz("Effect/BasicEff.img/NoRed1/" + d) + '" alt="' + d + '">').join("");
+}
+
 /* Today's quests, worked out once and shared by the quest list and the battle:
    your picks, or the soonest-due task when nothing is picked, plus what you
    finished today. */
@@ -2297,20 +2414,14 @@ function battleState(q) {
   return { maxHP, hp, won: maxHP > 0 && hp === 0, asleep: maxHP === 0 };
 }
 
-/* The stage is drawn on a 64 x 30 grid (y from -7): ground from y = 17. The
-   name tags, the monster's HP bar, damage and the meso drop are HTML laid over
-   it, placed by percentages of that grid so they follow it at any size. */
-const STAGE = { w: 64, top: -7, h: 30, ground: 17 };
-const stageX = (x) => (x / STAGE.w * 100).toFixed(1) + "%";
-const stageY = (y) => ((y - STAGE.top) / STAGE.h * 100).toFixed(1) + "%";
-
+/* The hunting ground: your character on the left, the monster on the right, on
+   the current map. Name tags, the monster's HP bar, damage and the meso drop sit
+   with each fighter. The stage itself is decoration; the panel beside it says
+   the same things in words. */
 function battleCard(q, level) {
   const h = heroOf();
   const b = battleState(q);
   const mob = mobFor(h, todayISO());
-  const rows = MOB_SPRITES[mob.sprite];
-  const mw = rows[0].length, mh = rows.length;
-  const mx = STAGE.w - 5 - mw, my = STAGE.ground - mh, mc = mx + mw / 2;
   const pct = b.maxHP ? Math.round(b.hp / b.maxHP * 100) : 0;
   const title = heroTitle();
   const caption = b.asleep
@@ -2318,30 +2429,19 @@ function battleCard(q, level) {
     : b.won ? "The " + mob.name + " is down and dropped its mesos. Every quest is done today."
     : "Finish a quest to strike. Each hit does its EXP in damage.";
   return '<section class="card battle' + (b.won ? " won" : "") + (b.asleep ? " asleep" : "") + '" id="battle">' +
-    '<div class="battle-stage">' +
-    '<svg class="battle-svg" viewBox="0 ' + STAGE.top + " " + STAGE.w + " " + STAGE.h +
-      '" shape-rendering="crispEdges" aria-hidden="true">' +
-    '<rect class="ground" x="0" y="' + STAGE.ground + '" width="64" height="7"/>' +
-    '<rect class="ground-grass" x="0" y="' + STAGE.ground + '" width="64" height="1"/>' +
-    '<rect class="ground-edge" x="0" y="' + (STAGE.ground + 1) + '" width="64" height="1"/>' +
-    [[5, 20], [17, 21], [30, 19], [41, 21], [55, 20]].map((p) =>
-      '<rect class="ground-speck" x="' + p[0] + '" y="' + p[1] + '" width="2" height="1"/>').join("") +
-    '<g transform="translate(6 0)"><g class="hero-anim">' + heroBodySVG(h) + heroWeaponSVG(h) + "</g></g>" +
-    '<g transform="translate(' + mx + " " + my + ')"><g class="mob-anim">' + mobSVG(mob) + "</g></g>" +
-    "</svg>" +
-    (b.asleep ? "" : '<div class="mob-hp" aria-hidden="true" style="left:' + stageX(mx + 1) + ";width:" +
-      stageX(mw - 2) + ";top:" + stageY(my - 3) + '"><i style="width:' + pct + '%"></i></div>') +
-    '<div class="nametag" aria-hidden="true" style="left:' + stageX(13) + ";top:" + stageY(STAGE.ground + 1.5) + '">' +
-      esc(heroName(h)) + "</div>" +
-    (title ? '<div class="nametag medal-tag" aria-hidden="true" style="left:' + stageX(13) + ";top:" +
-      stageY(STAGE.ground + 4) + '">' + esc(title) + "</div>" : "") +
-    '<div class="nametag mob-tag" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(STAGE.ground + 1.5) + '">' +
-      "Lv." + mob.level + " " + esc(mob.name) + "</div>" +
-    '<div class="dmg" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(my - 6) + '"></div>' +
-    '<div class="zzz" aria-hidden="true" style="left:' + stageX(mx + mw - 2) + ";top:" + stageY(my - 6) + '">z<span>z</span><span>Z</span></div>' +
-    '<div class="drops" aria-hidden="true" style="left:' + stageX(mc) + ";top:" + stageY(STAGE.ground - 2) + '">' +
-      "<i></i><i></i><i></i></div>" +
-    '<div class="victory" aria-hidden="true">Clear!</div>' +
+    '<div class="battle-stage" aria-hidden="true">' +
+    '<div class="fighter hero-fighter">' + heroSprite(h) +
+      '<span class="nametag">' + esc(heroName(h)) + "</span>" +
+      (title ? '<span class="nametag medal-tag">' + esc(title) + "</span>" : "") + "</div>" +
+    '<div class="fighter mob-fighter">' +
+      (b.asleep ? "" : '<div class="mob-hp"><i style="width:' + pct + '%"></i></div>') +
+      '<div class="dmg"></div>' +
+      '<div class="zzz">z<span>z</span><span>Z</span></div>' +
+      mobSprite(mob) +
+      '<span class="nametag mob-tag">Lv.' + mob.level + " " + esc(mob.name) + "</span>" +
+      '<div class="drops"><i></i><i></i><i></i></div>' +
+    "</div>" +
+    '<div class="victory">Clear!</div>' +
     "</div>" +
     '<div class="battle-info">' +
     '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong>" +
@@ -2355,7 +2455,7 @@ function battleCard(q, level) {
     "<tr><th>EXP</th><td>" + (b.asleep ? "\u2013" : b.maxHP) + "</td><th>Drops</th><td>Mesos, " +
       Math.round(LOOT_CHANCE * 100) + "% loot</td></tr></tbody></table>" +
     '<p class="battle-caption" role="status">' + caption + "</p>" +
-    '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button>' +
+    '<button class="btn btn-sm" data-act="hero-edit">👕 Closet</button>' +
     "</div></section>";
 }
 
@@ -2366,10 +2466,29 @@ function playStrike(xp) {
   card.classList.remove("attack", "finishing");
   void card.offsetWidth;                 // restart the animation on a quick second tick
   card.classList.add("attack");
-  if (card.classList.contains("won")) card.classList.add("finishing");
+  const won = card.classList.contains("won");
+  if (won) card.classList.add("finishing");
+
+  // The character attacks; the monster flinches, or falls if that was the last hit.
+  const h = heroOf();
+  const heroImg = card.querySelector(".hero-sprite:not(.broken) .ms-img");
+  if (heroImg) {
+    const av = avatarOf(h);
+    const stand = heroImg.src;
+    heroImg.dataset.alt = stand;                  // a weapon with no swing just keeps standing
+    // A fresh address each time, so the swing plays from its first frame.
+    heroImg.src = avatarURL(av, weaponActions(av.gear.Weapon).attack) + "&hit=" + Date.now();
+    setTimeout(() => { heroImg.removeAttribute("data-alt"); heroImg.src = stand; }, 700);
+  }
+  const mobEl = card.querySelector(".mob-sprite:not(.broken) .ms-img");
+  if (mobEl) {
+    const mob = mobFor(h, todayISO());
+    mobEl.src = mobImg(mob, won ? "die1" : "hit1");
+    if (!won) setTimeout(() => { mobEl.src = mobImg(mob, "stand"); }, 500);
+  }
   const dmg = card.querySelector(".dmg");
   if (dmg) {
-    dmg.textContent = "−" + xp;
+    dmg.innerHTML = damageDigits(xp);
     dmg.classList.remove("show");
     void dmg.offsetWidth;
     dmg.classList.add("show");
@@ -2377,51 +2496,240 @@ function playStrike(xp) {
   setTimeout(() => card.classList.remove("attack"), 700);
 }
 
-/* ---------- the customiser ---------- */
+/* ---------- the closet ----------
+   Like the game's: a tab for each slot, a search box, and a grid of real items
+   to try on. The preview changes as you pick; Save keeps the outfit. Items are
+   looked up live on maplestory.io as you search. */
 
-function heroEditor() {
-  state.heroDraft = heroOf();
-  const h = state.heroDraft;
-  // mode: "swatch" for colours, "index" for a plain list stored by position.
-  const group = (key, label, mode) =>
-    '<div class="field"><label>' + label + '</label><div class="opts" role="group" aria-label="' + label + '">' +
-    HERO_OPTIONS[key].map((o, i) => {
-      const swatch = mode === "swatch";
-      const val = mode ? i : o[1];
-      return '<button type="button" class="opt" data-act="hero-opt" data-key="' + key + '" data-val="' + val +
-        '" aria-pressed="' + (h[key] === val) + '">' +
-        (swatch ? '<span class="swatch-dot' + (o[1] === "daily" ? " swatch-daily" : "") + '"' +
-          (o[1] === "daily" ? "" : ' style="background:' + o[1] + '"') + "></span>" : "") + esc(o[0]) + "</button>";
-    }).join("") + "</div></div>";
-  openModal("Customize your hero and rival",
-    '<form id="hero-form" class="hero-editor">' +
-    '<div class="hero-preview" id="hero-preview">' + matchupPreview(h) + "</div>" +
-    '<div class="field"><label>Name <span class="hint">leave blank to use your first name</span></label>' +
-    '<input name="name" maxlength="24" value="' + esc(h.name) + '" placeholder="' + esc(firstName() || "Hero") + '"></div>' +
-    group("weapon", "Weapon") + group("hat", "Headgear") + group("hairStyle", "Hair") +
-    group("hairColor", "Hair colour", "swatch") + group("skin", "Skin tone", "swatch") + group("outfit", "Outfit", "swatch") +
-    '<h3 class="editor-sub">Your rival</h3>' + group("slime", "Monster", "index") +
-    "</form>",
-    '<button class="btn" data-act="close-modal">Cancel</button>' +
-    '<button class="btn btn-primary" data-act="hero-save">Save hero</button>',
-    { noFocus: true });
+const CLOSET_TABS = [
+  { key: "Hair", label: "Hair", filters: ["subCategoryFilter=Hair"] },
+  { key: "Face", label: "Face", filters: ["subCategoryFilter=Face"] },
+  { key: "Skin", label: "Skin", filters: [] },
+].concat(GEAR_SLOTS);
+
+const closetTab = (key) => CLOSET_TABS.find((t) => t.key === key) || CLOSET_TABS[3];
+
+// Hair and faces come in colours; the closet lists each style once and the
+// colour row picks the shade.
+function closetBase(tab, id) {
+  if (tab === "Hair") return id - (id % 10);
+  if (tab === "Face") return id - (Math.floor(id / 100) % 10) * 100;
+  return id;
 }
 
-function heroPick(key, raw) {
-  const h = state.heroDraft;
-  if (!h) return;
-  h[key] = /^\d+$/.test(raw) ? Number(raw) : raw;
-  $("#hero-preview").innerHTML = matchupPreview(h);
-  $$('.opt[data-key="' + key + '"]').forEach((b) =>
-    b.setAttribute("aria-pressed", String(b.dataset.val === String(raw))));
+function closetName(tab, name) {
+  const n = String(name || "");
+  if (tab === "Hair") return n.replace(new RegExp("^(" + HAIR_COLOURS.map((c) => c[0]).join("|") + ")\\s+", "i"), "");
+  if (tab === "Face") return n.replace(/\s*\([^)]*\)\s*$/, "");
+  return n;
+}
+
+function closetWorn(tab, id) {
+  const d = state.closet.draft;
+  if (tab === "Hair") return closetBase("Hair", d.hair) === id;
+  if (tab === "Face") return closetBase("Face", d.face) === id;
+  if (tab === "Skin") return d.skin === id;
+  return num(d.gear[tab]) === id;
+}
+
+function heroEditor() {
+  const h = heroOf();
+  state.closet = { tab: "Hat", q: "", items: [], start: 0, more: false, ticket: 0,
+                   draft: avatarOf(h), rival: num(h.slime) };
+  openModal("Closet",
+    '<div class="closet">' +
+    '<div class="closet-side">' +
+      '<div class="closet-preview" id="closet-preview">' + closetPreviewHTML() + "</div>" +
+      '<div class="field"><label for="closet-name">Name <span class="hint">blank uses your first name</span></label>' +
+      '<input id="closet-name" maxlength="24" value="' + esc(h.name || "") + '" placeholder="' +
+        esc(firstName() || "Hero") + '"></div>' +
+      '<h3 class="closet-sub">Wearing</h3><div class="closet-wearing" id="closet-wearing">' + closetWearingHTML() + "</div>" +
+      '<h3 class="closet-sub">Your rival</h3><div class="closet-rivals" id="closet-rivals">' + closetRivalsHTML() + "</div>" +
+    "</div>" +
+    '<div class="closet-main">' +
+      '<div class="closet-tabs" role="tablist" aria-label="Closet sections" id="closet-tabs">' + closetTabsHTML() + "</div>" +
+      '<div class="closet-tools" id="closet-tools">' + closetToolsHTML() + "</div>" +
+      '<div class="closet-grid" id="closet-grid" aria-live="polite"></div>' +
+      '<button type="button" class="btn btn-sm closet-more" id="closet-more" data-act="closet-more" hidden>Show more</button>' +
+    "</div></div>",
+    '<button class="btn" data-act="close-modal">Cancel</button>' +
+    '<button class="btn btn-primary" data-act="closet-save">Save</button>',
+    { wide: true, noFocus: true });
+  closetLoad(true);
+}
+
+function closetPreviewHTML() {
+  return heroSprite(heroOf(), "closet-hero", state.closet.draft);
+}
+
+function closetTabsHTML() {
+  return CLOSET_TABS.map((t) => '<button type="button" role="tab" class="closet-tab" data-act="closet-tab" data-tab="' +
+    t.key + '" aria-selected="' + (t.key === state.closet.tab) + '">' + t.label + "</button>").join("");
+}
+
+function closetToolsHTML() {
+  const c = state.closet;
+  const t = closetTab(c.tab);
+  if (c.tab === "Skin") return "";
+  const swatches = (act, list, current) => '<div class="closet-colours" role="group" aria-label="Colour">' +
+    list.map((x) => '<button type="button" class="swatch" data-act="' + act + '" data-val="' + x[1] +
+      '" aria-pressed="' + (x[1] === current) + '" title="' + x[0] + '" style="--sw:' + x[2] + '">' +
+      '<span class="sr-only">' + x[0] + "</span></button>").join("") + "</div>";
+  return '<input type="search" id="closet-q" class="closet-q" placeholder="Search ' + t.label.toLowerCase() +
+    '\u2026" value="' + esc(c.q) + '" aria-label="Search ' + esc(t.label) + '" autocomplete="off">' +
+    (c.tab === "Hair" ? swatches("closet-hair-colour", HAIR_COLOURS, c.draft.hair % 10) : "") +
+    (c.tab === "Face" ? swatches("closet-eye-colour", EYE_COLOURS, Math.floor(c.draft.face / 100) % 10) : "");
+}
+
+function closetWearingHTML() {
+  const d = state.closet.draft;
+  return GEAR_SLOTS.filter((s) => d.gear[s.key]).map((s) =>
+    '<span class="worn"><span class="slot-icon"><img src="' + itemIcon(d.gear[s.key]) + '" alt=""></span>' +
+    '<span class="worn-name">' + s.label + "</span>" +
+    '<button type="button" class="worn-off" data-act="closet-off" data-slot="' + s.key + '" aria-label="Take off ' +
+      s.label.toLowerCase() + '">\u00d7</button></span>').join("") ||
+    '<p class="closet-note">Nothing but the basics. Pick something on the right.</p>';
+}
+
+function closetRivalsHTML() {
+  const r = state.closet.rival;
+  return '<button type="button" class="rival" data-act="closet-rival" data-val="0" aria-pressed="' + (r === 0) + '">' +
+    '<span class="rival-pic">🎲</span><span>Changes daily</span></button>' +
+    MOBS.map((m, i) => '<button type="button" class="rival" data-act="closet-rival" data-val="' + (i + 1) +
+      '" aria-pressed="' + (r === i + 1) + '"><span class="rival-pic"><img src="' + mobImg(m, "stand") +
+      '" alt="" loading="lazy"></span><span>' + esc(m.name) + "</span></button>").join("");
+}
+
+function closetSlotHTML(x) {
+  const c = state.closet;
+  const id = closetBase(c.tab, x.id);
+  const name = closetName(c.tab, x.name);
+  return '<button type="button" class="slot-item" data-act="closet-pick" data-id="' + id + '" aria-pressed="' +
+    closetWorn(c.tab, id) + '" title="' + esc(name) + '"><span class="slot-icon"><img class="ms-icon" src="' + itemIcon(x.id) +
+    '" alt="" loading="lazy"></span><span class="slot-name">' + esc(name) + "</span></button>";
+}
+
+/* Fetch a page of items for the current tab and search. Each request carries a
+   ticket, so a slow answer to an older search can't overwrite a newer one. */
+async function closetLoad(reset) {
+  const c = state.closet;
+  const grid = $("#closet-grid");
+  if (!c || !grid) return;
+  const more = $("#closet-more");
+  if (c.tab === "Skin") {
+    grid.innerHTML = SKINS.map((k) => '<button type="button" class="slot-item" data-act="closet-pick" data-id="' + k[1] +
+      '" aria-pressed="' + (c.draft.skin === k[1]) + '"><span class="slot-icon"><span class="skin-dot" style="--sw:' + k[2] +
+      '"></span></span><span class="slot-name">' + k[0] + "</span></button>").join("");
+    more.hidden = true;
+    return;
+  }
+  const t = closetTab(c.tab);
+  if (reset) { c.items = []; c.start = 0; grid.innerHTML = '<p class="closet-note">Opening the closet\u2026</p>'; }
+  const ticket = ++c.ticket;
+  // Hair and faces list every colour separately; ask for more so a page has enough styles.
+  const each = Math.ceil((c.tab === "Hair" || c.tab === "Face" ? 320 : 60) / t.filters.length);
+  try {
+    const lists = await Promise.all(t.filters.map((f) =>
+      fetch(msURL("item?" + f.replace(/ /g, "%20") + "&searchFor=" + encodeURIComponent(c.q) +
+        "&startPosition=" + c.start + "&count=" + each)).then((r) => (r.ok ? r.json() : []))));
+    if (ticket !== c.ticket || state.closet !== c) return;
+    c.start += each;
+    c.more = lists.some((l) => l.length >= each);
+    const seen = new Set(c.items.map((x) => closetBase(c.tab, x.id)));
+    [].concat.apply([], lists).forEach((x) => {
+      const base = closetBase(c.tab, x.id);
+      if (!seen.has(base)) { seen.add(base); c.items.push(x); }
+    });
+    grid.innerHTML = c.items.length ? c.items.map(closetSlotHTML).join("")
+      : '<p class="closet-note">Nothing found' + (c.q ? " for \u201c" + esc(c.q) + "\u201d" : "") + ".</p>";
+    more.hidden = !c.more;
+  } catch (err) {
+    if (ticket !== c.ticket) return;
+    grid.innerHTML = '<p class="closet-note">The closet couldn\u2019t reach maplestory.io. Check the connection and try again.</p>';
+    more.hidden = true;
+  }
+}
+
+let closetTimer = null;
+function closetSearch(q) {
+  if (!state.closet) return;
+  state.closet.q = q.trim();
+  clearTimeout(closetTimer);
+  closetTimer = setTimeout(() => closetLoad(true), 300);
+}
+
+function closetSetTab(key) {
+  const c = state.closet;
+  c.tab = closetTab(key).key;
+  c.q = "";
+  $("#closet-tabs").innerHTML = closetTabsHTML();
+  $("#closet-tools").innerHTML = closetToolsHTML();
+  closetLoad(true);
+}
+
+// Try something on. Tapping what's already worn takes it off.
+function closetPick(id) {
+  const c = state.closet, d = c.draft;
+  if (c.tab === "Hair") d.hair = id + (d.hair % 10);
+  else if (c.tab === "Face") d.face = id + (Math.floor(d.face / 100) % 10) * 100;
+  else if (c.tab === "Skin") d.skin = id;
+  else closetWear(d, c.tab, num(d.gear[c.tab]) === id ? null : id);
+  closetRefresh();
+}
+
+function closetWear(d, slot, id) {
+  if (!id) { delete d.gear[slot]; return; }
+  d.gear[slot] = id;
+  if (slot === "Overall") { delete d.gear.Top; delete d.gear.Bottom; }
+  if (slot === "Top" || slot === "Bottom") delete d.gear.Overall;
+}
+
+function closetColour(kind, digit) {
+  const d = state.closet.draft;
+  if (kind === "hair") d.hair = closetBase("Hair", d.hair) + digit;
+  else d.face = closetBase("Face", d.face) + digit * 100;
+  closetRefresh();
+}
+
+/* Renders take a moment, so the old look stays up until the new one has arrived
+   rather than the preview going blank in between. */
+function closetRefreshPreview() {
+  const box = $("#closet-preview");
+  const img = box && box.querySelector(".sprite:not(.broken) .ms-img");
+  const a = state.closet.draft;
+  const url = avatarURL(a, weaponActions(a.gear.Weapon).stand);
+  if (!img) { box.innerHTML = closetPreviewHTML(); return; }
+  box.classList.add("loading");
+  const next = new Image();
+  next.onload = next.onerror = () => {
+    if (!state.closet || state.closet.draft !== a || $("#closet-preview") !== box) return;
+    if (avatarURL(state.closet.draft, weaponActions(state.closet.draft.gear.Weapon).stand) !== url) return;
+    img.dataset.alt = avatarURL(a, "stand1");
+    img.src = url;
+    box.classList.remove("loading");
+  };
+  next.src = url;
+}
+
+function closetRefresh() {
+  const c = state.closet;
+  closetRefreshPreview();
+  $("#closet-wearing").innerHTML = closetWearingHTML();
+  $("#closet-rivals").innerHTML = closetRivalsHTML();
+  $$("#closet-grid .slot-item").forEach((b) => b.setAttribute("aria-pressed", String(closetWorn(c.tab, num(b.dataset.id)))));
+  const digit = c.tab === "Hair" ? c.draft.hair % 10 : Math.floor(c.draft.face / 100) % 10;
+  $$("#closet-tools .swatch").forEach((b) => b.setAttribute("aria-pressed", String(num(b.dataset.val) === digit)));
 }
 
 function heroSave() {
-  const h = state.heroDraft || heroOf();
-  h.name = String(formValues($("#hero-form")).name || "").trim().slice(0, 24);
-  DB.game = DB.game || { bankedXP: 0, bankedDays: [] };
-  DB.game.hero = h;
-  state.heroDraft = null;
+  const c = state.closet;
+  if (!c) return;
+  const h = heroOf();
+  h.name = String(($("#closet-name") || {}).value || "").trim().slice(0, 24);
+  h.avatar = c.draft;
+  h.slime = c.rival;
+  gameData().hero = h;
+  state.closet = null;
   save(); closeModal(); render();
 }
 
@@ -2549,6 +2857,16 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "The real MapleStory art, and a closet",
+    asked: "It didn’t look like MapleStory. Make the monsters and my character look like the real ones, with the Big Bang-era look of the fan site, and give me a closet to pick and search outfits like the game.",
+    changed: [
+      "Monsters, your character, item icons, damage numbers and town backdrops are the game’s own art now, loaded live from maplestory.io (a fan site that serves the game’s files). If it can’t be reached, the drawn versions show instead.",
+      "Your hero is a real MapleStory character. Hits play the real swing, the monster flinches, and damage pops up in the game’s orange digits.",
+      "The 👕 Closet works like the game’s: a tab for each slot (hair, face, skin, hat, top, bottom, overall, shoes, gloves, cape, weapon and more), a search box, and colour choices for hair and eyes.",
+      "The look follows the Big Bang interface: silver windows, dark title plates with yellow pixel lettering, lime labels, glossy buttons, and the silver status bar with LV. and the EXP gauge.",
+      "Henesys, Ellinia, Kerning City, Perion, Lith Harbor, Ludibrium and Orbis are drawn from the game’s real backdrops, and the battle happens on whichever map you’ve equipped.",
+      "Six more monsters to fight: Ribbon Pig, Green Mushroom, Axe Stump, Horny Mushroom, Fire Boar and Copper Drake.",
+    ] },
   { date: "2026-10-02", title: "The MapleStory makeover",
     asked: "Study a MapleStory fan database site and make the tracker a gamified MapleStory version of itself.",
     changed: [
@@ -2732,7 +3050,7 @@ VIEWS.personal = function () {
     (title ? '<p class="hero-title"><span class="title-tag">' + esc(title) + "</span></p>" : "") +
     '<p>Lv.' + g.level + " · " + g.totalXP.toLocaleString() + " EXP · " +
       (g.streak ? g.streak + "-day streak" : "ready for a fresh start") + "</p>" +
-    '<button class="btn btn-sm" data-act="hero-edit">🎨 Customize hero</button></div></section>';
+    '<button class="btn btn-sm" data-act="hero-edit">👕 Closet</button></div></section>';
 
   html += '<h2 class="section-head">Stats</h2>' +
     '<p class="page-lede">Five stats, each with its own level and streak. Tap one for the detail and its badges.</p>' +
@@ -6488,8 +6806,14 @@ document.addEventListener("click", (e) => {
     case "toggle-todo": toggleTodo(id); break;
     case "loot-equip": equipLoot(el.dataset.kind, id); break;
     case "hero-edit": heroEditor(); break;
-    case "hero-opt": heroPick(el.dataset.key, el.dataset.val); break;
-    case "hero-save": heroSave(); break;
+    case "closet-tab": closetSetTab(el.dataset.tab); break;
+    case "closet-pick": closetPick(num(id)); break;
+    case "closet-off": closetWear(state.closet.draft, el.dataset.slot, null); closetRefresh(); break;
+    case "closet-hair-colour": closetColour("hair", num(el.dataset.val)); break;
+    case "closet-eye-colour": closetColour("eye", num(el.dataset.val)); break;
+    case "closet-rival": state.closet.rival = num(el.dataset.val); closetRefresh(); break;
+    case "closet-more": closetLoad(false); break;
+    case "closet-save": heroSave(); break;
     case "playbook-tag": state.playbookTag = el.dataset.tag; render(); break;
     case "playbook-quest": addPlaybookQuest(id); break;
     case "delete-todo":
@@ -6689,6 +7013,33 @@ document.addEventListener("keydown", (e) => {
     if (btn) { e.preventDefault(); btn.click(); }
   }
 });
+
+// Typing in the closet's search box looks items up as you go.
+document.addEventListener("input", (e) => {
+  if (e.target && e.target.id === "closet-q") closetSearch(e.target.value);
+});
+
+/* A live sprite that won't load tries its plainer pose, then shows the drawn one.
+   Errors don't bubble, so this listens on the way down. */
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (!img || img.tagName !== "IMG") return;
+  // An item with no icon on the fan site won't draw on the character either: drop it.
+  if (img.classList.contains("ms-icon")) {
+    const slot = img.closest(".slot-item");
+    if (slot) slot.remove();
+    return;
+  }
+  if (!img.classList.contains("ms-img")) return;
+  if (img.dataset.alt) {
+    const alt = img.dataset.alt;
+    img.removeAttribute("data-alt");
+    img.src = alt;
+    return;
+  }
+  const box = img.closest(".sprite");
+  if (box) box.classList.add("broken");
+}, true);
 
 // Pressing Enter in a single-line field submits the dialog instead of doing nothing.
 document.addEventListener("submit", (e) => {
