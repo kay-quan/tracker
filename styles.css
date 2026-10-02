@@ -4391,6 +4391,74 @@ summary.fold-head:hover .fold-caret { background: rgba(255, 255, 255, 0.28); }
 .loot-group[open] > .loot-head { margin-bottom: 10px; }
 .loot-card { padding: 14px 18px; }
 
+/* Cards laid out in a grid get their spacing from the grid's gap alone. The
+   "card + card" margin meant for stacked cards made the second, third... of a
+   row shorter and the gaps between stat rows uneven. */
+.monthstrip > .card, .stat-rows > .card, .tips > .card, .stat-trio > .card, .stat-trio > .trio { margin: 0; }
+/* Framed windows need a little more air between them than plain cards did. */
+.monthstrip { gap: 16px; }
+.stat-trio { gap: 14px; margin-bottom: 16px; }
+.stat-rows { gap: 10px; margin: 0; }
+.how-xp { margin: 0 0 10px; }
+
+/* "Completed" on Today: a title bar like the others, with a caret. */
+main > .disclosure, .disclosure {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  margin: 26px 0 12px;
+  padding: 6px 16px;
+  font-family: var(--pixel); font-weight: 700; font-size: 16px;
+  letter-spacing: 0.04em; text-transform: uppercase; text-align: left;
+  color: #FFD800;
+  text-shadow: 0 2px 0 #000;
+  background: var(--plate);
+  border: 0;
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 0 2px #B8BFC9, 0 0 0 4px #1E242C, var(--shadow-sm);
+  cursor: pointer;
+}
+.disclosure:hover { color: #FFE87A; }
+.disclosure:hover .fold-caret { background: rgba(255, 255, 255, 0.28); }
+.disclosure[aria-expanded="false"] .fold-caret::after { transform: rotate(-90deg); }
+.disclosure + .todo-card { margin-top: 0; }
+
+/* Outreach: the database in three chips. */
+.info-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.info-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px;
+  padding: 4px 12px;
+  font-weight: 700; font-size: 16px;
+  color: #FFFFFF;
+  background: rgba(12, 16, 26, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+}
+.info-chip strong { color: #FFE27A; font-size: 17px; }
+.info-sub { font-weight: 400; color: #C7D2E6; font-size: 14px; }
+
+/* Loot still to find: shown with how to get it. */
+.loot-sub { margin: 12px 0 8px; font-family: var(--pixel); font-weight: 700; font-size: 14px; text-transform: uppercase; color: var(--ink-3); }
+.locked-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 8px; }
+.locked {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 52px;
+  padding: 6px 10px;
+  background: #F1F3F6;
+  border: 1px dashed #AEB6C1;
+  border-radius: 8px;
+}
+.locked .bd-swatch.mini, .locked .skin-preview.mini { flex: none; opacity: 0.85; }
+.locked .skin-preview.mini { width: 54px; height: 16px; border-width: 2px; }
+.locked .skin-preview.mini .meter-fill { width: 70%; }
+.locked-icon { flex: none; width: 30px; text-align: center; font-size: 22px; filter: grayscale(0.6); opacity: 0.8; }
+.locked-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.locked-name { font-weight: 700; font-size: 15px; color: var(--ink); }
+.locked.rar-rare .locked-name { color: #1F63B5; }
+.locked.rar-epic .locked-name { color: #7A3FC2; }
+.locked-how { font-size: 13px; color: var(--ink-3); }
+
 /* ---------- the calendar ---------- */
 
 .cal-head {
@@ -4445,7 +4513,8 @@ summary.fold-head:hover .fold-caret { background: rgba(255, 255, 255, 0.28); }
   .cal-head h2 { font-size: 18px; }
   .cal-head .btn { padding: 4px 10px; }
   /* The calendar's three money boxes sit side by side; Money's month cards stack. */
-  .monthstrip:has(> .stat) { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .monthstrip:has(> .stat) { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .stat-trio { gap: 10px; }
   .monthstrip .stat { padding: 8px 10px; }
   .monthstrip .lbl { font-size: 13px; letter-spacing: 0; }
   .monthstrip .val { font-size: 17px; }

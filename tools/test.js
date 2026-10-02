@@ -1274,7 +1274,7 @@ t("old saves gain the stats and loot without losing anything", () => {
   eq(typeof db.game.loot.owned, "object");
 });
 
-t("Today shows all five stats; Personal shows only loot you've found", () => {
+t("Today shows all five stats; Personal lets you wear only loot you've found", () => {
   const db = T.withDefaults(T.defaultData());
   db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
   db.todos = [{ id: "a", text: "Ship the jacket", stat: "hustle" }];
@@ -1286,8 +1286,10 @@ t("Today shows all five stats; Personal shows only loot you've found", () => {
   T.STATS.forEach((s) => { if (today.indexOf('data-stat="' + s.id + '"') < 0) throw new Error("no tile for " + s.name); });
   T.setState({ view: "personal" });
   const p = T.VIEWS.personal();
-  if (p.indexOf("Inbox Slayer") < 0) throw new Error("found title missing");
-  if (p.indexOf("Main Character") >= 0) throw new Error("an unfound title is showing");
+  if (p.indexOf('data-act="loot-equip" data-kind="title" data-id="t-inbox"') < 0) throw new Error("found title can't be worn");
+  if (p.indexOf('data-id="t-maincharacter"') >= 0) throw new Error("an unfound title can be worn");
+  if (p.indexOf("Main Character") < 0) throw new Error("unfound titles should be listed to find");
+  if (p.indexOf("A 30-day Hustle streak") < 0) throw new Error("streak medals should say how to earn them");
   eq(T.heroTitle(), "Inbox Slayer");
   db.game.loot.equip.title = "t-maincharacter";
   eq(T.heroTitle(), "", "a title you don't own can't be worn");

@@ -3194,6 +3194,15 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-02", title: "All the loot, tidier stats and Outreach, a proper Completed bar",
+    asked: "The spacing between the stats on the Personal tab looked off. Show me the loot I haven\u2019t unlocked yet. Make the Outreach line about acts and lineups easier to read, even out the two By month cards on Money, and give \u201cCompleted\u201d on Today a background so it fits in.",
+    changed: [
+      "Loot now lists everything: what you\u2019ve found to wear, and under \u201cStill to find\u201d every other medal, gauge skin and map with its rarity and how to get it (a drop, a long streak, or the level a town opens at). Gauge skins and maps show a preview.",
+      "The stat rows on the Personal tab are evenly spaced.",
+      "Outreach: the database is three chips (acts, lineups, how many have an email) instead of a sentence on the map.",
+      "Money: the By month cards line up at the same height with an even gap.",
+      "Today: \u201cCompleted\u201d is a title bar like Quest log and Heads up, with an arrow to open it.",
+    ] },
   { date: "2026-10-02", title: "Fold-away sections, readable text and tidier spacing",
     asked: "The text above the sections on the Personal tab was hard to read. Let me close \u201cWhat goes where\u201d, the loot and the medals. The spacing looked stretched, and the calendar and the date / year-to-date line were hard to read.",
     changed: [
@@ -3407,17 +3416,45 @@ function lootPreview(kind, id) {
 }
 
 // Everything found so far, to wear. What's still hidden stays a surprise.
+// Every medal there is: the random ones, then the long-streak ones for each stat.
+function allMedals() {
+  const streak = [];
+  STATS.forEach((s) => [30, 100, 365].forEach((d) => streak.push(lootItem("st-" + s.id + "-" + d))));
+  return LOOT.filter((x) => x.kind === "title").concat(streak);
+}
+
+// How to get something you haven't got yet.
+function lootHow(it) {
+  if (it.kind === "backdrop") {
+    const m = WORLD.find((x) => x.id === it.id);
+    return "Opens at Lv." + (m ? m.level : "?") + ", or drops early";
+  }
+  if (it.stat) return "A " + it.days + "-day " + statById(it.stat).name + " streak";
+  return RARITY[it.rarity].name + " drop from a finished quest";
+}
+
+function lootLockedHTML(kind, items) {
+  if (!items.length) return "";
+  return '<p class="loot-sub">Still to find</p><div class="locked-grid">' + items.map((it) =>
+    '<div class="locked rar-' + it.rarity + '">' +
+    (kind === "bar" || kind === "backdrop" ? lootPreview(kind, it.id) : '<span class="locked-icon" aria-hidden="true">🏅</span>') +
+    '<span class="locked-text"><span class="locked-name">' + esc(it.name) + "</span>" +
+    '<span class="locked-how">🔒 ' + esc(lootHow(it)) + "</span></span></div>").join("") + "</div>";
+}
+
 function lootHTML() {
   const l = (DB.game && DB.game.loot) || {};
   const owned = l.owned || {}, eq = l.equip || {};
   const found = LOOT.filter((x) => owned[x.id]).length;
   const group = (kind, label, none) => {
-    const items = kind === "title"
-      ? Object.keys(owned).map(lootItem).filter((x) => x && x.kind === "title")
-      : kind === "backdrop" ? LOOT.filter((x) => x.kind === kind && mapOpen(x.id))
-      : LOOT.filter((x) => x.kind === kind && owned[x.id]);
-    const hidden = kind === "backdrop" ? LOOT.filter((x) => x.kind === kind && !mapOpen(x.id)).length
-      : LOOT.filter((x) => x.kind === kind && !owned[x.id]).length;
+    const townLevel = (x) => (WORLD.find((m) => m.id === x.id) || { level: 99 }).level;
+    const every = kind === "title" ? allMedals()
+      : kind === "backdrop" ? LOOT.filter((x) => x.kind === kind).sort((a, b) => townLevel(a) - townLevel(b))
+      : LOOT.filter((x) => x.kind === kind);
+    const have = (x) => (kind === "backdrop" ? mapOpen(x.id) : !!owned[x.id]);
+    const items = every.filter(have);
+    const locked = every.filter((x) => !have(x));
+    const hidden = locked.length;
     const current = eq[kind] && (kind === "backdrop" ? mapOpen(eq[kind]) : owned[eq[kind]]) ? eq[kind] : "";
     const key = "loot-" + kind;
     const wearing = current ? (lootItem(current) || {}).name : none;
@@ -3429,11 +3466,12 @@ function lootHTML() {
       lootOpt(kind, "", lootPreview(kind, "") + none, !current) +
       items.map((it) => lootOpt(kind, it.id, lootPreview(kind, it.id) + esc(it.name), current === it.id)).join("") +
       "</div>" +
-      '<p class="loot-hidden">' + (hidden ? hidden + (kind === "backdrop" ? " more towns to reach" : " more to find") : "All found!") + "</p></details>";
+      '<p class="loot-hidden">' + items.length + " of " + every.length + (hidden ? " found" : " found. All of them!") + "</p>" +
+      lootLockedHTML(kind, locked) + "</details>";
   };
   const recent = (l.recent || []).slice(0, 5).map((r) => lootItem(r.id)).filter(Boolean);
   return fold("loot", 'Loot <span class="count">' + found + " / " + LOOT.length + "</span>",
-    "Bonus drops from finished quests. Tap one you\u2019ve found to equip it.",
+    "Every finished quest has an " + Math.round(LOOT_CHANCE * 100) + "% chance of a drop, bosses always drop one, and long streaks earn medals. Tap one you\u2019ve found to equip it; the rest are listed underneath.",
     '<section class="card loot-card">' +
     group("title", "Medal", "No medal") + group("bar", "Gauge skin", "Classic") + group("backdrop", "Map", "Henesys") +
     '<p class="loot-world"><button type="button" class="btn btn-sm" data-act="world-map">🗺 World map</button> ' +
@@ -3588,7 +3626,8 @@ VIEWS.today = function () {
   const done = todos.filter((t) => t.done);
   if (done.length) {
     html += '<button class="disclosure" data-act="toggle-done" aria-expanded="' + !!state.showDone + '">' +
-      (state.showDone ? "▾" : "▸") + " Completed <span class=\"count\">" + done.length + "</span></button>";
+      '<span class="fold-title">Completed <span class="count">' + done.length + "</span></span>" +
+      '<span class="fold-caret" aria-hidden="true"></span></button>';
     if (state.showDone) {
       // Newest first, and each one can be put back rather than only deleted.
       const recent = done.slice().sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
@@ -5651,11 +5690,11 @@ VIEWS.outreach = function () {
   // Said once, here, rather than repeated on every lineup card.
   const st = window.ARTIST_STATS;
   if (st) {
-    html += '<p class="muted" style="font-size:15px;margin:0 0 12px">' +
-      "<strong>" + st.acts + "</strong> acts across <strong>" + st.festivals +
-      "</strong> lineups \u00b7 <strong>" + st.reachable + "</strong> with an address on file (" +
-      st.addresses + " total). Every address carries the page it was read from." +
-      "</p>";
+    html += '<div class="info-chips" title="Every address carries the page it was read from.">' +
+      '<span class="info-chip"><span aria-hidden="true">🎤</span> <strong>' + st.acts + "</strong> acts</span>" +
+      '<span class="info-chip"><span aria-hidden="true">🎪</span> <strong>' + st.festivals + "</strong> lineups</span>" +
+      '<span class="info-chip"><span aria-hidden="true">✉️</span> <strong>' + st.reachable + "</strong> with an email" +
+        " <span class=\"info-sub\">(" + st.addresses + " addresses)</span></span></div>";
   }
 
   /* ---- mode switch ---- */
