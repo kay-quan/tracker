@@ -3663,6 +3663,15 @@ tbody tr:hover { background: #FFF8DC; }
 .ystat b { font-size: 17px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ystat b.v-amber { color: var(--warn); }
 
+/* The star throw: Crystal Ilbis in flight, each landing with its own number, the
+   numbers stacking upward the way Lucky Seven's do. */
+.ilbi { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; opacity: 0; pointer-events: none; z-index: 3; }
+.dmg { flex-direction: column-reverse; align-items: center; }
+.dmg.show { opacity: 1; animation: none; }
+.dmg-line { display: flex; animation: dmg 0.9s ease-out both; }
+.preload { display: none; }
+@media (prefers-reduced-motion: reduce) { .dmg-line { animation: none; } }
+
 /* The fight answers a tap with a swing. */
 .battle-stage[data-act="battle-poke"] { cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; }
 .sb-meso-icon { height: 24px; width: auto; flex: none; }   /* 31×30 in the game; scaled smoothly, not pixelated, at a non-whole size */
@@ -3895,10 +3904,13 @@ body { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
    its fall, then it fades and leaves its mesos. */
 .battle.attack .hero-fighter { animation: step-in 0.55s ease-in-out; }
 @keyframes step-in { 35%, 55% { transform: translateX(14px); } }
-.battle.attack:not(.won) .mob-sprite { animation: knock 0.45s ease-out; }
+.battle.hit:not(.finishing) .mob-sprite { animation: knock 0.35s ease-out; }   /* as each star lands */
 @keyframes knock { 30% { transform: translateX(10px); } }
 .battle.won .mob-sprite, .battle.won .mob-tag, .battle.won .mob-hp { opacity: 0; }
 .battle.won.finishing .mob-sprite { animation: mob-fall 1.1s both; }
+/* Stars still in the air on the last quest: it's still standing, nothing dropped yet. */
+.battle.won.throwing .mob-sprite, .battle.won.throwing .mob-tag { opacity: 1; }
+.battle.won.throwing .victory, .battle.won.throwing .drops { display: none; }
 @keyframes mob-fall { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 
 .drops { position: absolute; left: 50%; bottom: 10px; width: 0; height: 0; display: none; pointer-events: none; }

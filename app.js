@@ -2448,6 +2448,7 @@ function weaponActions(id) {
   if (type >= 140 && type <= 144) return { stand: "stand2", attack: "swingT1" };
   if (type === 145) return { stand: "stand1", attack: "shoot1" };
   if (type === 146) return { stand: "stand2", attack: "shoot2" };
+  if (type === 147) return { stand: "stand1", attack: "stabO1" };        // a claw throws
   return { stand: "stand1", attack: "swingO1" };
 }
 
@@ -2559,6 +2560,9 @@ function battleCard(q, level) {
       '<div class="drops"><i></i><i></i><i></i></div>' +
     "</div>" +
     '<div class="victory">Clear!</div>' +
+    // The throw's frames and the stars, fetched ahead so the first throw isn't blank.
+    '<span class="preload">' + throwFrames(avatarOf(h)).concat([msWz(ILBI + 0), msWz(ILBI + 1)])
+      .map((u) => '<img src="' + esc(u) + '" alt="">').join("") + "</span>" +
     "</div>" +
     '<div class="battle-info">' +
     '<p class="battle-names"><strong>' + esc(heroName(h)) + "</strong>" +
@@ -2576,42 +2580,113 @@ function battleCard(q, level) {
     "</div></section>";
 }
 
+/* The strike is a star throw (Kevin, 2026-10-05: "like the throwing star animation,
+   and make the stars Crystal Ilbis"), the way Lucky Seven looks: the character winds
+   up and throws, two Crystal Ilbis spin across, and each lands with its own damage
+   number. Only a claw has art for the throw, so a character holding anything else
+   borrows the Maple Claw for it. */
+const ILBI = "Item/Consume/0207.img/02070016/bullet/";      // Crystal Ilbi in flight, 2 frames
+const THROW_CLAW = 1472030;                                 // the Maple Claw
+const isClaw = (id) => Math.floor(num(id) / 10000) === 147;
+function throwAvatar(av) {
+  return isClaw(av.gear.Weapon) ? av : Object.assign({}, av, { gear: Object.assign({}, av.gear, { Weapon: THROW_CLAW }) });
+}
+// The wind-up and the release, as still frames fetched ahead so the throw is instant.
+const throwFrames = (av) => [avatarURL(throwAvatar(av), "stabO1", 0), avatarURL(throwAvatar(av), "stabO1", 1)];
+
+// Two stars' worth of damage that add up to the whole (one star for a 1).
+function splitHits(n) {
+  const a = Math.ceil(n / 2);
+  return n - a > 0 ? [a, n - a] : [a];
+}
+
+/* Each star, from the hand to the monster, spinning. `land(i)` runs as star i hits.
+   With reduced motion asked for, or no way to animate, they simply land in turn. */
+function throwStars(card, n, land) {
+  const stage = card.querySelector(".battle-stage");
+  const hero = card.querySelector(".hero-fighter");
+  const mob = card.querySelector(".mob-fighter");
+  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!stage || !hero || !mob || still || !stage.animate || document.hidden) {
+    for (let i = 0; i < n; i++) setTimeout(() => land(i), 150 + i * 110);
+    return;
+  }
+  const s = stage.getBoundingClientRect(), h = hero.getBoundingClientRect(), m = mob.getBoundingClientRect();
+  const x0 = h.left - s.left + h.width * 0.72, y0 = h.top - s.top + h.height * 0.42;
+  const x1 = m.left - s.left + m.width * 0.42, y1 = m.top - s.top + m.height * 0.55;
+  for (let i = 0; i < n; i++) {
+    const star = document.createElement("img");
+    star.className = "ilbi";
+    star.alt = "";
+    star.src = msWz(ILBI + (i % 2));
+    stage.appendChild(star);
+    const dy = i * -12;                    // the second star a little higher, as the pair flies
+    const fly = star.animate([
+      { transform: "translate(" + x0 + "px," + (y0 + dy) + "px) rotate(0deg)", opacity: 1 },
+      { transform: "translate(" + x1 + "px," + (y1 + dy) + "px) rotate(1080deg)", opacity: 1 },
+    ], { duration: 230, delay: 150 + i * 110, easing: "linear", fill: "forwards" });
+    // Lands when the flight ends, or on a timer if the page stops animating mid-throw.
+    let landed = false;
+    const hit = () => { if (landed) return; landed = true; star.remove(); land(i); };
+    fly.onfinish = hit;
+    setTimeout(hit, 150 + i * 110 + 230 + 250);
+  }
+}
+
 // The strike itself, played after a quest is ticked off. `poke` is a tap on the
-// fight just for fun: the same swing, but it can't finish off a monster.
+// fight just for fun: the same throw, but it can't finish off a monster.
 function playStrike(xp, poke) {
   const card = $("#battle");
   if (!card) return;
-  card.classList.remove("attack", "finishing");
+  card.classList.remove("attack", "finishing", "hit", "throwing");
   void card.offsetWidth;                 // restart the animation on a quick second tick
   card.classList.add("attack");
   const down = card.classList.contains("won");   // already beaten today
   const won = down && !poke;
-  if (won) card.classList.add("finishing");
 
-  // The character attacks; the monster flinches, or falls if that was the last hit.
+  // The character winds up, then throws.
   const h = heroOf();
   const heroImg = card.querySelector(".hero-sprite:not(.broken) .ms-img");
   if (heroImg) {
-    const av = avatarOf(h);
-    const stand = heroImg.src;
-    heroImg.dataset.alt = stand;                  // a weapon with no swing just keeps standing
-    // A fresh address each time, so the swing plays from its first frame.
-    heroImg.src = avatarURL(av, weaponActions(av.gear.Weapon).attack) + "&hit=" + Date.now();
-    setTimeout(() => { heroImg.removeAttribute("data-alt"); heroImg.src = stand; }, 700);
+    const stand = heroImg.dataset.stand || heroImg.src;
+    heroImg.dataset.stand = stand;
+    heroImg.dataset.alt = stand;                  // if a frame won't load, keep standing
+    const [windUp, release] = throwFrames(avatarOf(h));
+    heroImg.src = windUp;
+    setTimeout(() => { heroImg.src = release; }, 150);
+    setTimeout(() => { heroImg.removeAttribute("data-alt"); heroImg.src = stand; }, 620);
   }
+
+  // Each star that lands knocks the monster back and shows its number; the last
+  // one of the day's last quest brings it down.
+  const hits = poke ? [1 + Math.floor(Math.random() * 99), 1 + Math.floor(Math.random() * 99)] : splitHits(xp);
+  const mob = mobFor(h, todayISO());
   const mobEl = card.querySelector(".mob-sprite:not(.broken) .ms-img");
-  if (mobEl && !(poke && down)) {
-    const mob = mobFor(h, todayISO());
-    mobEl.src = mobImg(mob, won ? "die1" : "hit1");
-    if (!won) setTimeout(() => { mobEl.src = mobImg(mob, "stand"); }, 500);
-  }
   const dmg = card.querySelector(".dmg");
-  if (dmg && !(poke && down)) {
-    dmg.innerHTML = damageDigits(xp);
-    dmg.classList.remove("show");
-    void dmg.offsetWidth;
-    dmg.classList.add("show");
-  }
+  if (dmg) { dmg.innerHTML = ""; dmg.classList.add("show"); }
+  // On the day's last quest the monster stays up until the last star lands.
+  if (won) card.classList.add("throwing");
+  let standUp = null;
+  throwStars(card, hits.length, (i) => {
+    const last = i === hits.length - 1;
+    if (poke && down) return;                     // nothing standing to hit
+    card.classList.remove("hit");
+    void card.offsetWidth;
+    card.classList.add("hit");
+    if (mobEl) {
+      clearTimeout(standUp);                       // a later star's hit replaces the last one's
+      mobEl.src = mobImg(mob, won && last ? "die1" : "hit1");
+      if (!(won && last)) standUp = setTimeout(() => { mobEl.src = mobImg(mob, "stand"); }, 420);
+    }
+    if (dmg) {
+      const line = document.createElement("div");
+      line.className = "dmg-line";
+      line.innerHTML = damageDigits(hits[i]);
+      dmg.appendChild(line);
+      setTimeout(() => line.remove(), 1000);
+    }
+    if (won && last) { card.classList.remove("throwing"); card.classList.add("finishing"); }
+  });
   setTimeout(() => card.classList.remove("attack"), 700);
 }
 
@@ -3243,6 +3318,13 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-05", title: "The attack is a Crystal Ilbi star throw",
+    asked: "Make the attack animation like the throwing star animation, and make the stars Crystal Ilbis.",
+    changed: [
+      "Your character winds up and throws with a claw, and two Crystal Ilbis spin across to the monster, the way Lucky Seven looks. Each star lands with its own damage number, stacked.",
+      "Finishing a quest: the two numbers add up to the EXP it earned. On the day’s last quest the monster stays up until the second star lands, then falls.",
+      "Holding a claw in the Closet? It throws with yours. Anything else borrows the Maple Claw for the throw, since only claws have the throwing pose.",
+    ] },
   { date: "2026-10-05", title: "Tidier pop-ups, a smaller money goal, a meso stack, tap to attack",
     asked: "The add gig / work pop-up is too big and everything’s pushed over to the side: make it smaller and tighter. The money goal on the Money tab is too big: make it smaller or collapsible. Use the meso money stack instead of the gold coin by my EXP. And make my character attack the monster when I tap it.",
     changed: [

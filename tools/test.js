@@ -114,7 +114,7 @@ let app = read("app.js").replace(
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
   "  heroTitle, addDays, avatarOf, avatarItems, avatarURL, weaponActions, closetBase, closetName,\n" +
   "  closetWear, AVATAR_DEFAULT, bossProgress, rewardProgress, mapOpen, WORLD, STAT_GUIDE, STAT_WORDS,\n" +
-  "  toggleTodo, isPhone, subOf, emailNextRows, followUpRows, followRank, eventMatches, eventsSearch, eventCountCell,\n" +
+  "  splitHits, throwAvatar, THROW_CLAW, toggleTodo, isPhone, subOf, emailNextRows, followUpRows, followRank, eventMatches, eventsSearch, eventCountCell,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1621,6 +1621,19 @@ t("Today, Money and Outreach fold away, and Invoices' Paid list starts shut", ()
   db.outreach = [{ id: "o", venue: "Sample Rooftop", email: "roof@example.test", status: "contacted", lastContact: "2026-09-01" }];
   T.setState({ view: "outreach", sub: { outreach: "follow" } });
   if (asPhone(() => T.VIEWS.outreach()).indexOf('data-fold="out-fu-3"') < 0) throw new Error("Follow up doesn't fold");
+});
+
+t("the attack is a two-star throw: the damage splits and adds up, and a claw is always in hand", () => {
+  eq(T.splitHits(85).join("+"), "43+42", "two stars that add up to the EXP");
+  eq(T.splitHits(1).join("+"), "1", "a single point is one star");
+  [2, 3, 50, 999].forEach((n) => eq(T.splitHits(n).reduce((a, b) => a + b, 0), n, "adds up for " + n));
+  const sword = { skin: 2000, face: 20000, hair: 30000, gear: { Weapon: 1302000, Top: 1040002 } };
+  const thrown = T.throwAvatar(sword);
+  eq(thrown.gear.Weapon, T.THROW_CLAW, "a sword borrows the claw to throw");
+  eq(sword.gear.Weapon, 1302000, "and the outfit itself is untouched");
+  const claw = { skin: 2000, face: 20000, hair: 30000, gear: { Weapon: 1472052 } };
+  eq(T.throwAvatar(claw).gear.Weapon, 1472052, "your own claw throws");
+  eq(T.weaponActions(1472052).attack, "stabO1", "a claw attacks by throwing");
 });
 
 /* ---------- work days ---------- */
