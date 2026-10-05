@@ -4606,6 +4606,25 @@ th, .mob-table th { font-size: 14px; }
    repeats, the padding and the stacking that go. app.js builds the phone pages
    (isPhone); these rules shape them. */
 
+/* Work: Kevin's day job (2026-10-04), blue beside gigs (green) and personal (purple). */
+.evchip.work, .chip.work { background: #DCE7F7; color: #1F4E9A; }
+.dot-work { background: #2F6BC4; }
+.evrow.work .evtitle { color: var(--ink); }
+.evrow.off .evtitle { color: var(--ink-3); text-decoration: line-through; }
+.ev-dayoff { margin-top: 6px; }
+/* Moving today's crossed-out tasks down: full width, under the quests. */
+.file-done { display: flex; width: 100%; justify-content: center; margin: 4px 0 6px;
+             font-family: var(--font); font-weight: 800; font-size: 16px; letter-spacing: 0; text-transform: none; }
+.daypanel-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+/* The seven days a repeat falls on, as one even row of toggles. */
+.opts.weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.opts.weekdays .opt { display: flex; align-items: center; justify-content: center; line-height: 1; min-height: 42px; padding: 4px 0;
+                      font-family: var(--font); font-weight: 800; font-size: 14px; letter-spacing: 0; }
+.opts.weekdays .opt::before { content: none; }
+
+.data-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-foot { display: none; }
+
 /* Grey "muted" text on a legend's dark backing all but vanished ("Peak month"). */
 .legend .muted { color: #D5DCE4; }
 
@@ -4715,6 +4734,33 @@ button.nx-row:hover { background: #F4F7FA; }
   body[data-view="today"] .app-meta { display: block; order: 0; flex: 1 1 auto; min-width: 0; margin: 0; }
   body[data-view="today"] .minimap { max-width: 100%; }
 
+  /* The header already names the page, so a page's own big title would only repeat it. */
+  .page-head h1 { display: none; }
+  .page-head p { margin-top: 0; }
+
+  /* Settings (Kevin, 2026-10-04: "the spacing looks a little weird"). Buttons that
+     couldn't wrap pushed the page wider than the phone; fields stacked with two
+     gaps between them; and Save sat only at the very top of a long form. */
+  .field { margin-bottom: 14px; }
+  .field label { font-size: 16px; margin-bottom: 5px; }
+  .field-row, .field-row-3 { row-gap: 0; }
+  .card > .field:last-child, .card > .field-row:last-child > .field { margin-bottom: 0; }
+  .sig-drop { display: none; }      /* paste or drop: a desktop thing; Choose File does it here */
+  .two-col { grid-template-columns: minmax(0, 1fr); }
+  .two-col > * { min-width: 0; }
+  code { overflow-wrap: anywhere; }
+  .data-btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .data-btns .btn, body[data-view="settings"] .card .btn {
+    justify-content: center; white-space: normal; text-align: center; line-height: 1.2;
+    font-family: var(--font); font-weight: 800; font-size: 15px; letter-spacing: 0; text-transform: none; }
+  .settings-foot {
+    display: block; position: sticky; z-index: 20;
+    bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+    margin-top: 12px;
+  }
+  .settings-foot .btn { width: 100%; justify-content: center; min-height: 50px; box-shadow: var(--shadow); }
+  body[data-view="settings"] .page-head .page-actions { display: none; }   /* the one at the bottom does it */
+
   /* tighter, not smaller */
   .section-head, .quest-head { margin: 16px 0 8px; }
   .fold { margin-top: 14px; }
@@ -4780,10 +4826,17 @@ button.nx-row:hover { background: #F4F7FA; }
   /* Calendar: gigs as coloured bars in the cell, the details in the day below */
   .cal-grid.gigs .cal-day, .cal-grid.events .cal-day { min-height: 46px; }
   .cal-grid.gigs .evchip { height: 6px; margin: 3px 0 0; padding: 0; font-size: 0; line-height: 0; border-radius: 3px; overflow: hidden; }
+  /* As thin bars the pale chip colours vanish: use the full ones. */
+  .cal-grid.gigs .evchip.gig { background: var(--money-in); }
+  .cal-grid.gigs .evchip.pers { background: var(--pers); }
+  .cal-grid.gigs .evchip.work { background: #2F6BC4; }
   .cal-grid.gigs .evmore { font-size: 11px; line-height: 1.2; }
   .cal-dow { font-size: 12px; }
   .cal-day.today .cal-date { width: 22px; height: 22px; font-size: 13px; }
   .daypanel-x { display: none; }
+  .daypanel-add { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .daypanel-add .btn, .ev-dayoff { justify-content: center; min-height: 38px; padding: 4px 6px; white-space: nowrap;
+    font-family: var(--font); font-weight: 800; font-size: 14px; letter-spacing: 0; text-transform: none; }
   .daypanel-head { flex-wrap: nowrap; align-items: center; gap: 8px; }
   .daypanel-head strong { flex: 1 1 auto; min-width: 0; font-size: 17px; }
   .daypanel-head .muted { flex: none; white-space: nowrap; font-size: 14px; }

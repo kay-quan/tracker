@@ -316,7 +316,7 @@ function closeModal() {
 
 function confirmDelete(what, onYes) {
   openModal("Delete " + what + "?",
-    "<p>This can't be undone. Your daily backup in the <code>backups</code> folder would still have it.</p>",
+    "<p>This can't be undone.</p>",
     '<button class="btn" data-act="close-modal">Cancel</button>' +
     '<button class="btn btn-danger" data-act="confirm-delete">Delete</button>');
   window.__confirmYes = onYes;
@@ -1424,7 +1424,8 @@ function saveTask(id) {
 
 // `skipId` leaves out a task already shown as Today's up-next quest.
 function todoListHTML(skipId, sheet) {
-  const open = (DB.todos || []).filter((t) => !t.done && !t.top && t.id !== skipId);
+  // Open tasks, plus today's crossed-out ones right where they were.
+  const open = (DB.todos || []).filter((t) => (!t.done || inPlace(t)) && !holdsSlot(t) && t.id !== skipId);
   if (!open.length) {
     const slotted = !!skipId || (DB.todos || []).some((t) => t.top && !t.done);
     return '<p class="muted list-empty">' +
@@ -1482,12 +1483,12 @@ function assignTop(taskId, rank) {
   const t = todos.find((x) => x.id === taskId);
   if (!t) return;
   const from = t.top && !t.done ? t.topRank : null;
-  const occupant = todos.find((x) => x !== t && x.top && !x.done && x.topRank === rank);
+  const occupant = todos.find((x) => x !== t && holdsSlot(x) && x.topRank === rank);
   if (occupant) {
     if (from !== null) {
       occupant.topRank = from;
     } else {
-      const used = todos.filter((x) => x.top && !x.done && x !== occupant).map((x) => x.topRank);
+      const used = todos.filter((x) => holdsSlot(x) && x !== occupant).map((x) => x.topRank);
       const free = [0, 1, 2].find((r) => r !== rank && used.indexOf(r) < 0);
       if (free !== undefined) occupant.topRank = free;
       else { occupant.top = false; occupant.topRank = null; }
@@ -1590,13 +1591,19 @@ function toggleTodo(id) {
   // Where the click happened. Finishing moves the card, but the reward belongs here.
   const was = $('.checkbtn[data-id="' + id + '"]');
   const at = was ? was.getBoundingClientRect() : null;
+  const wasInPlace = inPlace(t);
   t.done = !t.done;
   t.doneAt = t.done ? todayISO() : null;
+  delete t.filed;
   let drops = [];
   if (t.done) {
-    t.top = false; t.topRank = null;   // finishing frees its slot
-    drops = awardTask(t);
+    drops = awardTask(t);              // it keeps its slot, crossed out, until moved down
   } else {
+    /* Un-ticked where it sits, it goes back to being what it was. One brought back
+       from Completed (or from another day) returns to the list instead, as does a
+       quest whose slot has been filled since. */
+    const taken = t.top && (DB.todos || []).some((x) => x !== t && holdsSlot(x) && x.topRank === t.topRank);
+    if (!wasInPlace || taken) { t.top = false; t.topRank = null; }
     delete t.earned;                   // re-earned at the day's rate if ticked again
     const boss = t.boss && bossById(t.boss);
     if (boss) boss.defeatedAt = null;  // back on its feet (its drop was already paid)
@@ -2478,10 +2485,20 @@ function damageDigits(n) {
 /* Today's quests, worked out once and shared by the quest list and the battle:
    your picks, or the soonest-due task when nothing is picked, plus what you
    finished today. */
+/* A finished task stays where it was, crossed out, until you move it down to
+   Completed (Kevin, 2026-10-04: undoing a test tap meant digging it back out of
+   Completed). Tap it again and it's simply un-ticked, in the same spot. Anything
+   finished on an earlier day has gone down on its own. */
+function inPlace(t) { return !!t.done && !t.filed && t.doneAt === todayISO(); }
+
+// A quest slot is held by an open quest, or by one crossed out today.
+function holdsSlot(t) { return !!t.top && (!t.done || inPlace(t)); }
+
 function todaysQuests() {
   const todos = DB.todos || [];
   const today = todayISO();
-  const picked = todos.filter((t) => t.top && !t.done).sort((a, b) => a.topRank - b.topRank);
+  // Your picks in slot order, crossed-out ones included so nothing jumps.
+  const picked = todos.filter(holdsSlot).sort((a, b) => a.topRank - b.topRank);
   const doneToday = todos.filter((t) => t.done && t.doneAt === today);
   let fallback = null;
   if (!picked.length) {
@@ -2489,14 +2506,15 @@ function todaysQuests() {
     fallback = dated[0] || null;
   }
   const quests = fallback ? [fallback] : picked;
-  return { picked, doneToday, fallback, quests, total: quests.length + doneToday.length };
+  const open = quests.filter((t) => !t.done);
+  return { picked, doneToday, fallback, quests, open, total: open.length + doneToday.length };
 }
 
 // The monster's HP is the XP still on the table today.
 function battleState(q) {
   const sheet = statSheet();
-  const maxHP = q.quests.concat(q.doneToday).reduce((s, t) => s + taskXP(t, sheet), 0);
-  const hp = q.quests.reduce((s, t) => s + taskXP(t, sheet), 0);
+  const maxHP = q.open.concat(q.doneToday).reduce((s, t) => s + taskXP(t, sheet), 0);
+  const hp = q.open.reduce((s, t) => s + taskXP(t, sheet), 0);
   return { maxHP, hp, won: maxHP > 0 && hp === 0, asleep: maxHP === 0 };
 }
 
@@ -3201,6 +3219,15 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-04", title: "Finished tasks stay put, work days on the calendar, tidier Settings",
+    asked: "When I finish a task, don’t move it to Completed straight away: cross it out, and let me move it down when I’m ready, so undoing a tap is easy. Add a Work button on the calendar next to gig and personal event, for my full-time job. The spacing in Settings looks a little weird.",
+    changed: [
+      "Ticking a task crosses it out where it is, in today’s quests or the quest log. Tap it again to un-tick it, right there. “Move finished to Completed” under today’s quests sends them down when you’re ready, and anything finished on an earlier day goes down on its own.",
+      "Calendar: a “+ Work” button beside + Gig and + Personal. Work repeats every week on the days you tick (Mon–Fri to start), with an optional end date, and shows in blue. “Day off” takes a single day out, with Undo.",
+      "A gig on a work day gets a heads up on that day.",
+      "Settings on a phone fits the screen (one button was pushing it wider), the fields are evenly spaced, and Save sits at the bottom of the screen while you scroll.",
+      "Settings no longer says your data lives in a file with daily backups: it’s in your account. The delete box doesn’t promise a backup either.",
+    ] },
   { date: "2026-10-02", title: "A phone layout: one section at a time",
     asked: "On my phone everything is tight and takes up the whole screen, and I have to scroll forever to get to my stuff. Local Events doesn’t even show the calendar, just a long list. Money and Outreach take forever to find what I need.",
     changed: [
@@ -3617,6 +3644,7 @@ VIEWS.today = function () {
      always one obvious place to start. ---- */
   const q = todaysQuests();
   const { picked, doneToday, fallback, quests, total } = q;
+  const crossed = todos.filter(inPlace);
 
   /* ---- the battle: today's quests are the monster's HP ---- */
   html += battleCard(q, g.level);
@@ -3625,7 +3653,7 @@ VIEWS.today = function () {
   html += '<div class="quest-head"><h2>Today’s quests</h2>' +
     (total ? '<span class="count-pill">' + doneToday.length + " of " + total + " done</span>" : "") + "</div>";
 
-  quests.forEach((t, i) => { html += questCard(t, { upNext: i === 0, fromLog: t === fallback, sheet: sheet }); });
+  quests.forEach((t) => { html += questCard(t, { upNext: t === q.open[0], fromLog: t === fallback, sheet: sheet }); });
 
   // One open slot at a time: a drop target for dragging, a button for tapping.
   const used = picked.map((t) => t.topRank);
@@ -3639,8 +3667,15 @@ VIEWS.today = function () {
 
   /* Finished quests leave the list straight away and go to Completed below; the
      counter and the monster keep score. */
-  if (!quests.length && doneToday.length) {
+  if (!q.open.length && doneToday.length) {
     html += '<p class="quests-clear">\ud83c\udf89 All of today\u2019s quests are done. Nice work.</p>';
+  }
+
+  /* Today's crossed-out tasks go down to Completed when you say so: one button, up
+     here where you've just been ticking, for the quests and the log alike. */
+  if (crossed.length) {
+    html += '<button class="btn file-done" data-act="file-done">\u2193 Move ' + crossed.length +
+      " finished to Completed</button>";
   }
 
   /* ---- the quest log: everything else ---- */
@@ -3652,7 +3687,7 @@ VIEWS.today = function () {
   html += '<div class="card card-pad todo-card">' + todoAddRow() +
     '<div id="todo-list">' + todoListHTML(fallback && fallback.id, sheet) + "</div></div>";
 
-  const done = todos.filter((t) => t.done);
+  const done = todos.filter((t) => t.done && !inPlace(t));
   if (done.length) {
     html += '<button class="disclosure" data-act="toggle-done" aria-expanded="' + !!state.showDone + '">' +
       '<span class="fold-title">Completed <span class="count">' + done.length + "</span></span>" +
@@ -3924,8 +3959,26 @@ function monthLabelOf(calMonth) {
 }
 
 /* Every day a personal event covers, so a week-long trip appears across the week
-   rather than only on the day it starts. Capped so a mistyped year can't spin. */
+   rather than only on the day it starts. Capped so a mistyped year can't spin.
+
+   An event that repeats (Kevin's day job, 2026-10-04) carries the weekdays it falls
+   on, 0 = Sunday: it lands on those days from its start until its end, or for well
+   over a year past today when it has none. Days you're off are listed in `skip`. */
+function repeats(e) { return Array.isArray(e.days) && e.days.length > 0; }
+
 function personalDays(e) {
+  if (repeats(e)) {
+    const from = e.date;
+    const last = e.endDate && e.endDate > from ? e.endDate
+      : addDays(todayISO() > from ? todayISO() : from, 400);
+    const out = [];
+    let d = from;
+    for (let i = 0; i < 1500 && d <= last; i++) {
+      if (e.days.indexOf(parseISO(d).getDay()) >= 0 && (e.skip || []).indexOf(d) < 0) out.push(d);
+      d = addDays(d, 1);
+    }
+    return out;
+  }
   const out = [e.date];
   if (!e.endDate || e.endDate <= e.date) return out;
   let d = e.date;
@@ -3936,7 +3989,20 @@ function personalDays(e) {
   return out;
 }
 
+// "Mon–Fri", "Mon, Wed, Fri", "every day": the days a repeating event falls on.
+const DOW_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function daysLabel(days) {
+  const d = days.slice().sort((a, b) => a - b);
+  if (d.length === 7) return "every day";
+  const run = d.length > 2 && d.every((x, i) => !i || x === d[i - 1] + 1);
+  return run ? DOW_SHORT[d[0]] + "–" + DOW_SHORT[d[d.length - 1]] : d.map((x) => DOW_SHORT[x]).join(", ");
+}
+
 function spanLabel(e) {
+  if (repeats(e)) {
+    return "every " + daysLabel(e.days).replace(/^every /, "") +
+      (e.endDate && e.endDate > e.date ? " until " + fmtDate(e.endDate) : "");
+  }
   if (!e.endDate || e.endDate <= e.date) return "";
   return fmtDate(e.date) + " – " + fmtDate(e.endDate);
 }
@@ -3947,13 +4013,19 @@ function spanLabel(e) {
    are stored apart from gigs so they can never turn up in a fee total, an owed
    figure or a month's projection. */
 
-const PERSONAL_KINDS = ["Personal", "Birthday", "Trip", "Appointment", "Family", "Other"];
+const PERSONAL_KINDS = ["Personal", "Work", "Birthday", "Trip", "Appointment", "Family", "Other"];
+const isWork = (e) => e.kind === "Work";
 
 function personalById(id) { return (DB.personal || []).find((x) => x.id === id); }
 
-function personalForm(rec, presetDate) {
-  const e = rec || { id: null, title: "", date: presetDate || todayISO(), endDate: "",
-                     startTime: "", endTime: "", kind: "Personal", location: "", notes: "" };
+// `work` opens a new one as your day job: called Work, every Mon–Fri from that day.
+function personalForm(rec, presetDate, work) {
+  const e = rec || (work
+    ? { id: null, title: "Work", date: presetDate || todayISO(), endDate: "", days: [1, 2, 3, 4, 5],
+        startTime: "", endTime: "", kind: "Work", location: "", notes: "" }
+    : { id: null, title: "", date: presetDate || todayISO(), endDate: "",
+        startTime: "", endTime: "", kind: "Personal", location: "", notes: "" });
+  const days = repeats(e) ? e.days : [];
   const body =
     '<form id="personal-form">' +
     '<div class="field"><label>What is it?</label>' +
@@ -3963,10 +4035,15 @@ function personalForm(rec, presetDate) {
     '<div class="field"><label>Starts</label><input type="date" name="date" value="' +
     esc(e.date) + '" required></div>' +
     /* Blank for a single day. A trip that runs a week should show on all seven,
-       not just the day you leave. */
-    '<div class="field"><label>Ends <span class="hint">leave blank for one day</span>' +
+       not just the day you leave. For a repeating one, blank keeps it going. */
+    '<div class="field"><label>Ends <span class="hint">blank: one day, or if it repeats, no end</span>' +
     '</label><input type="date" name="endDate" value="' + esc(e.endDate || "") + '"></div>' +
     "</div>" +
+    /* A shift you work every week: tick its days once instead of adding each one. */
+    '<div class="field"><label id="repeat-l">Repeats every week on <span class="hint">leave all off for a one-off</span></label>' +
+    '<div class="opts weekdays" role="group" aria-labelledby="repeat-l">' + DOW_SHORT.map((d, i) =>
+      '<label class="opt"><input type="checkbox" name="days" value="' + i + '"' +
+      (days.indexOf(i) >= 0 ? " checked" : "") + ">" + d + "</label>").join("") + "</div></div>" +
     '<div class="field"><label>Kind</label><select name="kind">' +
     selectOptions(PERSONAL_KINDS, e.kind, "") + "</select></div>" +
     '<div class="field-row">' +
@@ -3979,7 +4056,7 @@ function personalForm(rec, presetDate) {
     '<div class="field"><label>Notes <span class="hint">optional</span></label>' +
     '<textarea name="notes">' + esc(e.notes) + "</textarea></div></form>";
 
-  openModal(e.id ? "Edit event" : "Add a personal event", body,
+  openModal(e.id ? (isWork(e) ? "Edit work" : "Edit event") : work ? "Add work days" : "Add a personal event", body,
     (e.id ? '<button class="btn btn-danger btn-sm" data-act="delete-personal" data-id="' +
       e.id + '">Delete</button>' : "") +
     '<div class="spacer"></div><button class="btn" data-act="close-modal">Cancel</button>' +
@@ -3997,12 +4074,14 @@ function savePersonal(id) {
   let from = v.date, to = (v.endDate || "").trim();
   if (to && to < from) { const t = from; from = to; to = t; }
   if (to === from) to = "";                  // a one-day range is just a date
+  const days = $$('#personal-form input[name="days"]:checked').map((x) => Number(x.value));
 
   Object.assign(rec, {
     title: v.title.trim(), date: from, endDate: to, kind: v.kind || "Personal",
     startTime: v.startTime, endTime: v.endTime,
     location: v.location.trim(), notes: v.notes.trim(),
   });
+  if (days.length) rec.days = days; else { delete rec.days; delete rec.skip; }
   if (!existing) { DB.personal = DB.personal || []; DB.personal.push(rec); }
   save();
   closeModal();
@@ -4037,6 +4116,7 @@ function gigsCalendar() {
     '<div class="page-head"><div><h1>Calendar</h1></div>' +
     '<div class="page-actions">' + calTabs() +
     '<button class="btn" data-act="new-personal">＋ Add event</button>' +
+    '<button class="btn" data-act="new-work">＋ Work</button>' +
     '<button class="btn btn-primary" data-act="new-gig">＋ Add gig</button></div></div>';
 
   html += calNav(monthLabelOf(state.calMonth));
@@ -4066,7 +4146,8 @@ function gigsCalendar() {
 
   html += monthGrid((iso) => {
     const list = byDate[iso] || [];
-    const pers = persByDate[iso] || [];
+    // Your day job first among the personal things: it's what shapes the day.
+    const pers = (persByDate[iso] || []).slice().sort((a, b) => (isWork(b) ? 1 : 0) - (isWork(a) ? 1 : 0));
     // Work first, then personal, then a count of whatever didn't fit.
     const room = Math.max(0, 3 - list.length);
     const hidden = Math.max(0, list.length - 3) + Math.max(0, pers.length - room);
@@ -4077,8 +4158,8 @@ function gigsCalendar() {
       esc(g.title || "Gig") + "</div>").join("") +
       pers.slice(0, room).map((e) => {
         // A middle day of a trip is prefixed, so the first day still reads as the start.
-        const cont = e.endDate && e.date !== iso;
-        return '<div class="evchip pers" data-act="edit-personal" data-id="' + esc(e.id) +
+        const cont = e.endDate && e.date !== iso && !repeats(e);
+        return '<div class="evchip ' + (isWork(e) ? "work" : "pers") + '" data-act="edit-personal" data-id="' + esc(e.id) +
           '" title="' + esc(e.title + (spanLabel(e) ? " · " + spanLabel(e) : "") +
             (e.location ? " · " + e.location : "")) + '">' +
           (cont ? "· " : "") + esc(e.title) + "</div>";
@@ -4088,7 +4169,8 @@ function gigsCalendar() {
 
   html += gigDayPanel(byDate[state.gigDay] || [], persByDate[state.gigDay] || []);
   html += '<div class="legend legend-sm">' +
-    '<span><i class="dot dot-gig"></i>work</span>' +
+    '<span><i class="dot dot-gig"></i>gig</span>' +
+    '<span><i class="dot dot-work"></i>work</span>' +
     '<span><i class="dot dot-pers"></i>personal</span></div>';
   html += "</div>";
 
@@ -4121,7 +4203,9 @@ function gigsCalendar() {
    that is how a day is actually lived, but visibly distinct. */
 function gigDayPanel(list, pers) {
   const iso = state.gigDay;
-  pers = pers || [];
+  pers = (pers || []).slice().sort((a, b) => (isWork(b) ? 1 : 0) - (isWork(a) ? 1 : 0));
+  // A repeating day you've marked off still says so, with a way back.
+  const off = (DB.personal || []).filter((e) => repeats(e) && (e.skip || []).indexOf(iso) >= 0);
   const long = parseISO(iso).toLocaleDateString(undefined,
     { weekday: "long", month: "long", day: "numeric" });
 
@@ -4129,8 +4213,10 @@ function gigDayPanel(list, pers) {
 
   /* Said once, at the top. A gig and something personal on the same day is worth
      noticing before you find out the hard way. */
-  if (list.length && pers.length) {
-    html += '<div class="daypanel-clash">Heads up — you have work and something ' +
+  if (list.length && pers.some(isWork)) {
+    html += '<div class="daypanel-clash">Heads up — you have a gig on a work day.</div>';
+  } else if (list.length && pers.length) {
+    html += '<div class="daypanel-clash">Heads up — you have a gig and something ' +
       "personal on this day.</div>";
   }
 
@@ -4159,27 +4245,39 @@ function gigDayPanel(list, pers) {
     html += pers.map((e) => {
       const span = spanLabel(e);
       /* On a multi-day event the times belong to the event, not to this one day,
-         so the slot says which day of the run you are looking at instead. */
-      const when = span
+         so the slot says which day of the run you are looking at instead. A
+         repeating one has the same hours every time, so it keeps them. */
+      const when = span && !repeats(e)
         ? "day " + (personalDays(e).indexOf(iso) + 1) + " of " + personalDays(e).length
         : (e.startTime ? esc(fmtTime(e.startTime)) +
             (e.endTime ? "–" + esc(fmtTime(e.endTime)) : "") : "all day");
-      return '<div class="evrow pers"><div class="evtime">' + when + "</div>" +
+      const work = isWork(e);
+      return '<div class="evrow ' + (work ? "work" : "pers") + '"><div class="evtime">' + when + "</div>" +
         '<div class="evbody"><div class="evtitle">' + esc(e.title) +
-        ' <span class="chip pers">' + esc(e.kind || "Personal") + "</span></div>" +
+        // The kind as a tag, unless the name already says it ("Work", tagged Work).
+        ((e.kind || "Personal") !== e.title
+          ? ' <span class="chip ' + (work ? "work" : "pers") + '">' + esc(e.kind || "Personal") + "</span>" : "") + "</div>" +
         (span ? '<div class="evdetails">' + esc(span) + "</div>" : "") +
         (e.location ? '<div class="evdetails">' + esc(e.location) + "</div>" : "") +
         (e.notes ? '<div class="evdetails">' + esc(e.notes) + "</div>" : "") +
+        (repeats(e) ? '<button class="btn btn-sm ev-dayoff" data-act="day-off" data-id="' + esc(e.id) +
+          '" data-date="' + esc(iso) + '" title="Not on this day, just this once">Day off</button>' : "") +
         "</div>" +
         '<button class="iconbtn" data-act="edit-personal" data-id="' + esc(e.id) +
         '" title="Edit">\u270e</button></div>';
     }).join("");
   }
-  html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+  html += off.map((e) => '<div class="evrow off"><div class="evtime">off</div>' +
+    '<div class="evbody"><div class="evtitle">' + esc(e.title) + " \u00b7 day off</div></div>" +
+    '<button class="btn btn-sm" data-act="day-on" data-id="' + esc(e.id) + '" data-date="' + esc(iso) +
+    '">Undo</button></div>').join("");
+  html += '<div class="daypanel-add">' +
     '<button class="btn btn-sm" data-act="new-gig" data-date="' + esc(iso) +
     '">＋ Gig</button>' +
+    '<button class="btn btn-sm" data-act="new-work" data-date="' + esc(iso) +
+    '">＋ Work</button>' +
     '<button class="btn btn-sm" data-act="new-personal" data-date="' + esc(iso) +
-    '">＋ Personal event</button></div>';
+    '">＋ Personal</button></div>';
   return html + "</div>";
 }
 
@@ -7208,20 +7306,23 @@ VIEWS.settings = function () {
     '<p class="card-title">Your data</p>' +
     '<p class="muted" style="font-size:15px;margin:0 0 12px">Build <strong id="build-stamp">' +
     esc(BUILD) + "</strong> \u2014 quote this if something looks out of date.</p>" +
-    '<p class="muted" style="font-size:16px;margin-top:0">Everything lives in <code>data.json</code> inside the ' +
-    "<code>income-tracker</code> folder. A dated copy is tucked into <code>backups/</code> the first time you " +
-    "change anything each day.</p>" +
+    /* It used to say records lived in a data.json with daily backups; they've lived
+       in your account since the move to sync, so say that, and how to keep a copy. */
     '<p class="muted" style="font-size:16px;margin:0 0 12px">Signed in as <strong>' +
     esc((Cloud.session && Cloud.session.email) || "") + "</strong>. " +
-    'Your records sync to every device you sign in on.</p>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    "Your records live in your account and sync to every device you sign in on. " +
+    "To keep a copy of your own, download everything below.</p>" +
+    '<div class="data-btns">' +
     '<button type="button" class="btn" data-act="export-json">Download everything (JSON)</button>' +
     '<button type="button" class="btn" data-act="export-income">Income CSV</button>' +
     '<button type="button" class="btn" data-act="export-expenses">Expenses CSV</button>' +
     '<button type="button" class="btn btn-danger" data-act="sign-out">Sign out</button>' +
     "</div></div></div>" +
 
-    "</div></form>";
+    /* On a phone this long form's only Save was back at the top: this one rides
+       along the bottom of the screen while you're in the form. */
+    '</div><div class="settings-foot"><button type="button" class="btn btn-primary" data-act="save-settings">' +
+    "Save settings</button></div></form>";
 };
 
 VIEWS.settings.after = function () {
@@ -7466,6 +7567,16 @@ document.addEventListener("click", (e) => {
     }
 
     case "new-personal": personalForm(null, el.dataset.date || state.gigDay); break;
+    case "new-work": personalForm(null, el.dataset.date || state.gigDay, true); break;
+    case "day-off": case "day-on": {
+      // One day out of a repeating event, or back in.
+      const e = personalById(id);
+      if (!e) break;
+      e.skip = (e.skip || []).filter((d) => d !== el.dataset.date);
+      if (act === "day-off") e.skip.push(el.dataset.date);
+      save(); render();
+      break;
+    }
     case "edit-personal": personalForm(personalById(id)); break;
     case "save-personal": savePersonal(id || null); break;
     case "delete-personal":
@@ -7636,9 +7747,16 @@ document.addEventListener("click", (e) => {
       DB.todos = (DB.todos || []).filter((x) => x.id !== id);
       save(); refreshTodoList();
       break;
-    case "clear-done":
-      bankXP(DB.todos || []);
-      DB.todos = (DB.todos || []).filter((x) => !x.done);
+    case "clear-done": {
+      // Only what's down in Completed; today's crossed-out tasks stay put.
+      const gone = (DB.todos || []).filter((x) => x.done && !inPlace(x));
+      bankXP(gone);
+      DB.todos = (DB.todos || []).filter((x) => gone.indexOf(x) < 0);
+      save(); refreshTodoList();
+      break;
+    }
+    case "file-done":
+      (DB.todos || []).filter(inPlace).forEach((x) => { x.filed = true; x.top = false; x.topRank = null; });
       save(); refreshTodoList();
       break;
 

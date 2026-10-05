@@ -37,12 +37,14 @@ const eq = (a, b, what) => {
 /* ---------- stubs ---------- */
 const noop = () => {};
 const el = () => ({
-  innerHTML: "", textContent: "", value: "", className: "", style: {}, dataset: {},
+  innerHTML: "", textContent: "", value: "", className: "", style: { setProperty: noop }, dataset: {},
   classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
   appendChild: noop, removeChild: noop, remove: noop, focus: noop, blur: noop,
   addEventListener: noop, removeEventListener: noop, setAttribute: noop,
   getAttribute: () => null, querySelector: () => el(), querySelectorAll: () => [],
   closest: () => null, scrollIntoView: noop, children: [], parentNode: null,
+  getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }),
+  offsetWidth: 0, offsetHeight: 0,
 });
 const doc = {
   scripts: [{ getAttribute: () => "app.js?v=56" }],
@@ -112,7 +114,7 @@ let app = read("app.js").replace(
   "  previewXP, awardTask, rollLoot, lootItem, LOOT, LOOT_CHANCE, STREAK_MILESTONES, milestonesDue,\n" +
   "  heroTitle, addDays, avatarOf, avatarItems, avatarURL, weaponActions, closetBase, closetName,\n" +
   "  closetWear, AVATAR_DEFAULT, bossProgress, rewardProgress, mapOpen, WORLD, STAT_GUIDE, STAT_WORDS,\n" +
-  "  isPhone, subOf, emailNextRows, followUpRows, followRank, eventMatches, eventsSearch, eventCountCell,\n" +
+  "  toggleTodo, isPhone, subOf, emailNextRows, followUpRows, followRank, eventMatches, eventsSearch, eventCountCell,\n" +
   "  setDB: (d) => { DB = d; }, getDB: () => DB, setState: (s) => { state = s; }, getState: () => state};\n"
 );
 vm.runInContext(app, sandbox, { filename: "app.js" });
@@ -1075,20 +1077,54 @@ t("a picked monster sticks; 'changes daily' follows the date", () => {
   eq(T.mobFor({}, "2026-10-01").name, T.mobOfDay("2026-10-01").name, "unset is daily");
 });
 
-t("a quest finished today leaves the quest list but still counts", () => {
+t("a task finished today stays put, crossed out, until it's moved to Completed", () => {
   const db = T.withDefaults(T.defaultData());
   db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
-  const today = T.isoOf(new Date());
+  const today = T.isoOf(new Date()), yesterday = T.addDays(today, -1);
   db.todos = [
     { id: "a", text: "Still to do", done: false, top: true, topRank: 0 },
-    { id: "b", text: "Finished earlier", done: true, doneAt: today },
+    { id: "b", text: "Finished quest", done: true, doneAt: today, top: true, topRank: 1 },
+    { id: "c", text: "Finished log task", done: true, doneAt: today },
+    { id: "d", text: "Finished yesterday", done: true, doneAt: yesterday, top: true, topRank: 2 },
+    { id: "e", text: "Moved down today", done: true, doneAt: today, filed: true },
   ];
   T.setDB(db);
   T.setState({ view: "today", showDone: false });
   const html = T.VIEWS.today();
-  if (html.indexOf("Finished earlier") >= 0) throw new Error("finished quest still on screen");
-  if (html.indexOf("Still to do") < 0) throw new Error("open quest missing");
-  if (html.indexOf("1 of 2 done") < 0) throw new Error("counter should still read 1 of 2 done");
+  const log = html.indexOf("Quest log");
+  const quest = html.indexOf("Finished quest"), row = html.indexOf("Finished log task");
+  if (quest < 0 || quest > log) throw new Error("a finished quest should stay in today's quests");
+  if (row < log) throw new Error("a finished log task should stay in the quest log");
+  if (!/class="taskrow done"/.test(html)) throw new Error("not crossed out");
+  if (html.indexOf("Finished yesterday") >= 0) throw new Error("yesterday's should have gone down on its own");
+  if (html.indexOf("Moved down today") >= 0) throw new Error("one moved to Completed is still on the list");
+  if (html.indexOf("Move 2 finished to Completed") < 0) throw new Error("no button to move them down");
+  if (html.indexOf("3 of 4 done") < 0) throw new Error("the counter should read 3 of 4 done");
+  // The crossed-out quest still holds its slot; yesterday's doesn't.
+  eq(T.todaysQuests().picked.map((x) => x.id).join(","), "a,b");
+});
+
+t("un-ticking a crossed-out task puts it back where it was", () => {
+  const db = T.withDefaults(T.defaultData());
+  const today = T.isoOf(new Date());
+  db.todos = [
+    { id: "q", text: "Quest", done: false, top: true, topRank: 1, stat: "craft" },
+    { id: "f", text: "From Completed", done: true, doneAt: today, filed: true, stat: "mind" },
+  ];
+  T.setDB(db);
+  T.setState({ view: "today", showDone: false });
+  T.toggleTodo("q");
+  const q = db.todos[0];
+  eq(q.done, true); eq(q.top, true, "finishing keeps the slot"); eq(q.topRank, 1);
+  T.toggleTodo("q");
+  eq(q.done, false); eq(q.top, true, "back in its slot"); eq(q.topRank, 1);
+  // Brought back from Completed: onto the list, not into a slot.
+  T.toggleTodo("f");
+  eq(db.todos[1].done, false); eq(!!db.todos[1].top, false); eq(db.todos[1].filed, undefined);
+  // Finished on another day, it went down on its own: un-ticked, it goes to the list too.
+  db.todos.push({ id: "y", text: "Yesterday's quest", done: true, doneAt: T.addDays(today, -1), top: true, topRank: 2 });
+  T.toggleTodo("y");
+  eq(db.todos[2].done, false); eq(db.todos[2].top, false, "an old quest doesn't reclaim its slot");
 });
 
 t("the update log is newest first and every entry says what was asked and what changed", () => {
@@ -1540,6 +1576,41 @@ t("a phone's Today puts quests before the stats, which fold away", () => {
   const panel = html.indexOf("stats-head");
   if (panel >= 0 && panel < quests) throw new Error("the full stats panel still sits above the quests");
   if (/data-fold="today-stats"[^>]* open/.test(html)) throw new Error("the stats fold should start shut");
+});
+
+/* ---------- work days ---------- */
+
+t("work repeats on the weekdays you pick, skips days off, and stops at its end", () => {
+  T.setDB(T.defaultData());
+  // 2026-10-05 is a Monday. Two working weeks.
+  const e = { date: "2026-10-05", endDate: "2026-10-18", days: [1, 2, 3, 4, 5], kind: "Work" };
+  const d = T.personalDays(e);
+  eq(d.length, 10, "ten weekdays in two weeks");
+  eq(d[0], "2026-10-05");
+  eq(d.indexOf("2026-10-10"), -1, "not on a Saturday");
+  e.skip = ["2026-10-07"];
+  eq(T.personalDays(e).indexOf("2026-10-07"), -1, "a day off is off");
+  eq(T.personalDays(e).length, 9);
+  const open = T.personalDays({ date: "2026-10-05", days: [1] });
+  if (open.length < 50) throw new Error("a repeat with no end stopped early: " + open.length);
+  eq(T.spanLabel({ date: "2026-10-05", days: [1, 2, 3, 4, 5] }), "every Mon–Fri");
+  eq(T.spanLabel({ date: "2026-10-05", days: [5, 1, 3], endDate: "2026-12-31" }).indexOf("every Mon, Wed, Fri until"), 0);
+});
+
+t("the calendar marks work days, offers + Work, and flags a gig on one", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.personal = [{ id: "w", title: "Work", kind: "Work", date: "2026-10-05", endDate: "", days: [1, 2, 3, 4, 5],
+                   startTime: "09:00", endTime: "17:00" }];
+  db.gigs = [{ id: "g", title: "Club night", date: "2026-10-06", fee: 300, status: "confirmed" }];
+  T.setDB(db);
+  T.setState({ view: "calendar", calMonth: "2026-10", gigDay: "2026-10-06", calMode: "gigs" });
+  const html = T.VIEWS.calendar();
+  if (html.indexOf('class="evchip work"') < 0) throw new Error("work isn't on the grid");
+  if (html.indexOf('data-act="new-work"') < 0) throw new Error("no + Work button");
+  if (html.indexOf("a gig on a work day") < 0) throw new Error("no heads up for a gig on a work day");
+  if (html.indexOf('data-act="day-off"') < 0) throw new Error("no way to take the day off");
+  T.getState().gigDay = "2026-10-10";
+  if (T.VIEWS.calendar().indexOf('data-act="day-off"') >= 0) throw new Error("work shown on a Saturday");
 });
 
 /* ---------- report ---------- */
