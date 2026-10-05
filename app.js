@@ -942,7 +942,10 @@ function statusBarHTML() {
       '" aria-valuemin="0" aria-valuemax="' + g.xpPerLevel + '" aria-valuenow="' + g.xpIntoLevel + '">' +
       '<span class="meter-fill" style="width:' + pct.toFixed(2) + '%"></span>' +
       '<span class="sb-num">EXP ' + g.xpIntoLevel + " / " + g.xpPerLevel + " [" + pct.toFixed(2) + "%]</span></span>" +
-    '<span class="sb-meso" title="Net income this year">' + money0(ytdFigures().net) + "</span></div>";
+    /* The game's own meso stack beside the year's money (Kevin, 2026-10-05). If it
+       can't load, the drawn coin underneath comes back. */
+    '<span class="sb-meso" title="Net income this year"><img class="sb-meso-icon" src="' + msURL("item/9000002/icon") +
+    '" alt="" onerror="this.remove()">' + money0(ytdFigures().net) + "</span></div>";
 }
 
 function renderTabbar() {
@@ -2543,7 +2546,7 @@ function battleCard(q, level) {
     : b.won ? "The " + mob.name + " is down and dropped its mesos. Every quest is done today."
     : "Finish a quest to strike. Each hit does its EXP in damage.";
   return '<section class="card battle' + (b.won ? " won" : "") + (b.asleep ? " asleep" : "") + '" id="battle">' +
-    '<div class="battle-stage" aria-hidden="true">' +
+    '<div class="battle-stage" aria-hidden="true" data-act="battle-poke" title="Tap to attack">' +
     '<div class="fighter hero-fighter">' + heroSprite(h) +
       '<span class="nametag">' + esc(heroName(h)) + "</span>" +
       (title ? '<span class="nametag medal-tag">' + esc(title) + "</span>" : "") + "</div>" +
@@ -2573,14 +2576,16 @@ function battleCard(q, level) {
     "</div></section>";
 }
 
-// The strike itself, played after a quest is ticked off.
-function playStrike(xp) {
+// The strike itself, played after a quest is ticked off. `poke` is a tap on the
+// fight just for fun: the same swing, but it can't finish off a monster.
+function playStrike(xp, poke) {
   const card = $("#battle");
   if (!card) return;
   card.classList.remove("attack", "finishing");
   void card.offsetWidth;                 // restart the animation on a quick second tick
   card.classList.add("attack");
-  const won = card.classList.contains("won");
+  const down = card.classList.contains("won");   // already beaten today
+  const won = down && !poke;
   if (won) card.classList.add("finishing");
 
   // The character attacks; the monster flinches, or falls if that was the last hit.
@@ -2595,19 +2600,28 @@ function playStrike(xp) {
     setTimeout(() => { heroImg.removeAttribute("data-alt"); heroImg.src = stand; }, 700);
   }
   const mobEl = card.querySelector(".mob-sprite:not(.broken) .ms-img");
-  if (mobEl) {
+  if (mobEl && !(poke && down)) {
     const mob = mobFor(h, todayISO());
     mobEl.src = mobImg(mob, won ? "die1" : "hit1");
     if (!won) setTimeout(() => { mobEl.src = mobImg(mob, "stand"); }, 500);
   }
   const dmg = card.querySelector(".dmg");
-  if (dmg) {
+  if (dmg && !(poke && down)) {
     dmg.innerHTML = damageDigits(xp);
     dmg.classList.remove("show");
     void dmg.offsetWidth;
     dmg.classList.add("show");
   }
   setTimeout(() => card.classList.remove("attack"), 700);
+}
+
+/* Tap the fight and your character takes a swing (Kevin, 2026-10-05). Only for fun:
+   the monster's HP is today's quests, so a tap never moves it. One swing at a time. */
+let pokeAt = 0;
+function pokeBattle() {
+  if (Date.now() - pokeAt < 650) return;
+  pokeAt = Date.now();
+  playStrike(1 + Math.floor(Math.random() * 99), true);
 }
 
 /* ---------- the closet ----------
@@ -3229,6 +3243,14 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-05", title: "Tidier pop-ups, a smaller money goal, a meso stack, tap to attack",
+    asked: "The add gig / work pop-up is too big and everything’s pushed over to the side: make it smaller and tighter. The money goal on the Money tab is too big: make it smaller or collapsible. Use the meso money stack instead of the gold coin by my EXP. And make my character attack the monster when I tap it.",
+    changed: [
+      "Pop-ups on a phone: date and time boxes no longer run off the right edge, the spacing is tighter, short fields sit side by side (start and end times, fee and hours), and the title and Save button stay in place while the fields scroll.",
+      "Money: the goal is a small card, with the percent, a thin bar and the figures in a grid, and it folds away with the year-to-date total on its bar.",
+      "The bar along the bottom shows the game’s meso stack beside your money.",
+      "Tap the fight on Today and your character swings at the monster, with a damage number. Just for fun: it doesn’t change the monster’s HP, which is still your quests.",
+    ] },
   { date: "2026-10-05", title: "Move to Completed on every finished task; Money and Outreach fold",
     asked: "Make the Money and Outreach sections collapsible too. When I finish one of today’s quests, how am I supposed to move it to Completed? Figure out a solution.",
     changed: [
@@ -3766,22 +3788,27 @@ VIEWS.money = function () {
   const open = DB.invoices.filter((inv) => ["sent", "overdue", "partial"].includes(invoiceStatus(inv)));
   const awaiting = open.reduce((s, inv) => s + (invoiceTotals(inv).total - invoicePaid(inv)), 0);
 
-  let html = '<div class="card card-pad hero">';
-  html += '<div class="hero-top"><span class="hero-num">' + money(f.net) + "</span>" +
-    (f.goal
-      ? '<span class="hero-goal">of <strong>' + money(f.goal) + "</strong> goal</span>"
-      : '<a href="#" class="hero-goal" data-act="set-goal">set a goal</a>') + "</div>";
+  /* The year at a glance: small, and folding away, with the year-to-date figure on
+     its bar so it still shows when shut (Kevin, 2026-10-05: "I don't like how big the
+     money goal is"). */
+  const ystat = (label, value, tone) => '<div class="ystat"><span>' + esc(label) + "</span>" +
+    "<b" + (tone ? ' class="v-' + tone + '"' : "") + ">" + value + "</b></div>";
+  let card = '<div class="card card-pad hero">';
   if (f.goal) {
     const pct = Math.max(0, Math.min(100, (f.net / f.goal) * 100));
-    html += '<div class="progress"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
+    card += '<p class="hero-line"><strong>' + Math.floor(pct) + "%</strong> of your <strong>" + money0(f.goal) +
+      '</strong> goal \u00b7 <a href="#" data-act="set-goal">change</a></p>' +
+      '<div class="progress"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
+  } else {
+    card += '<p class="hero-line"><a href="#" data-act="set-goal">Set an income goal</a> to see how the year is going against it.</p>';
   }
-  html += '<div class="hero-rows">' +
-    row("Awaiting payment", money(awaiting), awaiting > 0 ? "amber" : "") +
-    row("Earned this year", money(f.earned), "") +
-    row("Spent this year", money(f.spent), "") +
-    (f.goal ? row("Weeks left in " + f.year, f.weeksLeft.toFixed(1), "") : "") +
-    (f.goal ? row("Pace needed", money(f.pace) + "/wk", "") : "") +
+  card += '<div class="ystats">' +
+    ystat("Awaiting", money(awaiting), awaiting > 0 ? "amber" : "") +
+    ystat("Earned", money(f.earned)) +
+    ystat("Spent", money(f.spent)) +
+    (f.goal ? ystat("Weeks left", f.weeksLeft.toFixed(1)) + ystat("Pace needed", money0(f.pace) + "/wk") : "") +
     "</div></div>";
+  let html = fold("money-goal", 'Year to date <span class="count">' + money(f.net) + "</span>", "", card);
 
   const phone = isPhone();
   const heroHTML = html;
@@ -3923,10 +3950,6 @@ VIEWS.money = function () {
   return out;
 };
 
-function row(label, value, tone) {
-  return '<div class="krow"><span>' + esc(label) + '</span><span class="' +
-    (tone ? "v-" + tone : "") + '">' + value + "</span></div>";
-}
 
 VIEWS.calendar = function () {
   if (!state.calMonth) {
@@ -4068,14 +4091,15 @@ function personalForm(rec, presetDate, work) {
     esc(e.date) + '" required></div>' +
     /* Blank for a single day. A trip that runs a week should show on all seven,
        not just the day you leave. For a repeating one, blank keeps it going. */
-    '<div class="field"><label>Ends <span class="hint">blank: one day, or if it repeats, no end</span>' +
+    '<div class="field"><label>Ends <span class="hint">optional</span>' +
     '</label><input type="date" name="endDate" value="' + esc(e.endDate || "") + '"></div>' +
     "</div>" +
     /* A shift you work every week: tick its days once instead of adding each one. */
-    '<div class="field"><label id="repeat-l">Repeats every week on <span class="hint">leave all off for a one-off</span></label>' +
+    '<div class="field"><label id="repeat-l">Repeats every week on</label>' +
     '<div class="opts weekdays" role="group" aria-labelledby="repeat-l">' + DOW_SHORT.map((d, i) =>
       '<label class="opt"><input type="checkbox" name="days" value="' + i + '"' +
-      (days.indexOf(i) >= 0 ? " checked" : "") + ">" + d + "</label>").join("") + "</div></div>" +
+      (days.indexOf(i) >= 0 ? " checked" : "") + ">" + d + "</label>").join("") + "</div>" +
+    '<p class="field-note">None ticked: a one-off. Days ticked and no end date: it keeps going.</p></div>' +
     '<div class="field"><label>Kind</label><select name="kind">' +
     selectOptions(PERSONAL_KINDS, e.kind, "") + "</select></div>" +
     '<div class="field-row">' +
@@ -7773,6 +7797,7 @@ document.addEventListener("click", (e) => {
     case "world-map": worldMap(); break;
     case "travel": equipLoot("backdrop", id); closeModal(); break;
     case "hero-edit": heroEditor(); break;
+    case "battle-poke": pokeBattle(); break;
     case "closet-tab": closetSetTab(el.dataset.tab); break;
     case "closet-pick": closetPick(num(id)); break;
     case "closet-off": closetWear(state.closet.draft, el.dataset.slot, null); closetRefresh(); break;

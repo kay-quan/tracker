@@ -1596,6 +1596,7 @@ t("Today, Money and Outreach fold away, and Invoices' Paid list starts shut", ()
   T.setDB(db);
   T.setState({ view: "today", showDone: false });
   const html = T.VIEWS.today();
+  if (html.indexOf('class="battle-stage" aria-hidden="true" data-act="battle-poke"') < 0) throw new Error("the fight can't be tapped");
   ["today-quests", "today-log"].forEach((k) => {
     if (html.indexOf('data-fold="' + k + '"') < 0) throw new Error(k + " doesn't fold");
   });
@@ -1613,6 +1614,8 @@ t("Today, Money and Outreach fold away, and Invoices' Paid list starts shut", ()
     if (money.indexOf('data-fold="' + k + '"') < 0) throw new Error(k + " doesn't fold");
   });
   if (!/data-fold="money-paid"[\s\S]*?fold-actions[\s\S]*?new-income/.test(money)) throw new Error("Log a payment left the Collected bar");
+  if (!/data-fold="money-goal"[^>]*>[\s\S]*?Year to date <span class="count">/.test(money)) throw new Error("the year's money doesn't fold with its total on the bar");
+  if (money.indexOf("hero-num") >= 0) throw new Error("the big goal number is back");
   const phoneMoney = asPhone(() => T.VIEWS.money());
   if (phoneMoney.indexOf('data-fold="money-owed"') < 0) throw new Error("a phone's Overview lost its fold");
   db.outreach = [{ id: "o", venue: "Sample Rooftop", email: "roof@example.test", status: "contacted", lastContact: "2026-09-01" }];
