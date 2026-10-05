@@ -1098,10 +1098,14 @@ t("a task finished today stays put, crossed out, until it's moved to Completed",
   if (!/class="taskrow done"/.test(html)) throw new Error("not crossed out");
   if (html.indexOf("Finished yesterday") < done) throw new Error("yesterday's should have gone down on its own");
   if (html.indexOf("Moved down today") < done) throw new Error("one moved to Completed is still on the list");
-  // Each section clears its own crossed-out tasks; Completed empties from its bar.
-  const qClear = html.indexOf('data-scope="quests"'), lClear = html.indexOf('data-scope="log"');
-  if (qClear < 0 || qClear > log) throw new Error("no Clear for the crossed-out quest");
-  if (lClear < log || lClear > done) throw new Error("no Clear for the crossed-out log task");
+  // Every crossed-out task has its own way down; Completed empties from its bar.
+  const qMove = html.indexOf('data-act="file-one" data-id="b"'), lMove = html.indexOf('data-act="file-one" data-id="c"');
+  if (qMove < 0 || qMove > log) throw new Error("the crossed-out quest has no Move to Completed");
+  if (lMove < log || lMove > done) throw new Error("the crossed-out log task has no Move to Completed");
+  if (html.indexOf('data-act="file-one" data-id="a"') >= 0) throw new Error("an open task offered Move to Completed");
+  if (html.indexOf('data-act="file-done"') >= 0) throw new Error("Move all shouldn't show for a single task");
+  db.todos.push({ id: "c2", text: "Another log task", done: true, doneAt: today });
+  if (T.VIEWS.today().indexOf('data-scope="log">↓ Move all 2 finished') < 0) throw new Error("no Move all for two");
   if (html.indexOf('data-act="clear-done-ask"') < done) throw new Error("Completed can't be emptied from its bar");
   if (/data-fold="today-done"[^>]* open/.test(html)) throw new Error("Completed should start shut");
   if (html.indexOf("3 of 4 done") < 0) throw new Error("the counter should read 3 of 4 done");
@@ -1583,7 +1587,7 @@ t("a phone's Today puts quests before the stats, which fold away", () => {
   if (/data-fold="today-stats"[^>]* open/.test(html)) throw new Error("the stats fold should start shut");
 });
 
-t("Today's sections fold away, and Invoices' Paid list starts shut", () => {
+t("Today, Money and Outreach fold away, and Invoices' Paid list starts shut", () => {
   const db = T.withDefaults(T.defaultData());
   db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
   db.todos = [{ id: "a", text: "Ship it", top: true, topRank: 0 }, { id: "b", text: "Later" }];
@@ -1601,6 +1605,19 @@ t("Today's sections fold away, and Invoices' Paid list starts shut", () => {
   T.setState({ view: "invoices" });
   const inv = T.VIEWS.invoices();
   if (!/data-fold="inv-paid" data-fold-shut="1">/.test(inv)) throw new Error("Paid should fold, shut to start");
+  // Money and Outreach fold the same way, on a desktop and on a phone.
+  db.income = [{ id: "n", date: new Date().getFullYear() + "-02-02", amount: 100, source: "Sample" }];
+  T.setState({ view: "money", calMonth: null, period: "year", year: new Date().getFullYear() });
+  const money = T.VIEWS.money();
+  ["money-owed", "money-paid", "money-chart", "money-where"].forEach((k) => {
+    if (money.indexOf('data-fold="' + k + '"') < 0) throw new Error(k + " doesn't fold");
+  });
+  if (!/data-fold="money-paid"[\s\S]*?fold-actions[\s\S]*?new-income/.test(money)) throw new Error("Log a payment left the Collected bar");
+  const phoneMoney = asPhone(() => T.VIEWS.money());
+  if (phoneMoney.indexOf('data-fold="money-owed"') < 0) throw new Error("a phone's Overview lost its fold");
+  db.outreach = [{ id: "o", venue: "Sample Rooftop", email: "roof@example.test", status: "contacted", lastContact: "2026-09-01" }];
+  T.setState({ view: "outreach", sub: { outreach: "follow" } });
+  if (asPhone(() => T.VIEWS.outreach()).indexOf('data-fold="out-fu-3"') < 0) throw new Error("Follow up doesn't fold");
 });
 
 /* ---------- work days ---------- */

@@ -1319,6 +1319,7 @@ function taskRow(t, opts) {
     notesHTML(t) +
     "</div>" +
     (o.restore ? "" : xpPill(t, o.sheet)) +
+    (o.restore ? "" : fileBtn(t)) +
     '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
     (o.restore
       ? '<button class="btn btn-sm" data-act="toggle-todo" data-id="' + t.id + '">Restore</button>'
@@ -1343,7 +1344,7 @@ function questCard(t, o) {
     (o.fromLog ? '<button class="btn btn-sm quest-add" data-act="pick-task" data-id="' + t.id +
       '" data-rank="0">Add to today</button>' : "") +
     "</div>" +
-    '<div class="quest-side">' + xpPill(t, o.sheet) +
+    '<div class="quest-side">' + xpPill(t, o.sheet) + fileBtn(t) +
     '<div class="quest-tools">' +
     '<button class="iconbtn" data-act="edit-todo" data-id="' + t.id + '" title="Edit" aria-label="Edit task">\u270e</button>' +
     (slotted ? '<button class="iconbtn" data-act="untop-todo" data-id="' + t.id +
@@ -2491,6 +2492,15 @@ function damageDigits(n) {
    finished on an earlier day has gone down on its own. */
 function inPlace(t) { return !!t.done && !t.filed && t.doneAt === todayISO(); }
 
+/* The way down, on the task itself (Kevin, 2026-10-05: "when I finish today's quest,
+   how am I supposed to move it to the completed section?"). Only on a crossed-out one. */
+function fileBtn(t) {
+  return inPlace(t)
+    ? '<button class="btn btn-sm file-one" data-act="file-one" data-id="' + t.id + '" title="Put it away in Completed">' +
+      "Move to Completed</button>"
+    : "";
+}
+
 // A quest slot is held by an open quest, or by one crossed out today.
 function holdsSlot(t) { return !!t.top && (!t.done || inPlace(t)); }
 
@@ -3219,6 +3229,13 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-05", title: "Move to Completed on every finished task; Money and Outreach fold",
+    asked: "Make the Money and Outreach sections collapsible too. When I finish one of today’s quests, how am I supposed to move it to Completed? Figure out a solution.",
+    changed: [
+      "Every crossed-out task has its own “Move to Completed” button, right on it under the EXP. Tap it and that one goes down. “Move all” appears in a section once two or more are crossed out.",
+      "Money: By month, Awaiting payment, Collected, In vs. out and Where it went each fold away, and stay how you left them.",
+      "Outreach: Drafted, Up next and the Follow up groups fold away. In All, each lineup is a bar you open, shut to start.",
+    ] },
   { date: "2026-10-05", title: "Fold-away Today sections, a Clear button you can find, Paid folds",
     asked: "I can tick things off, but how do I clear them? Make Today’s quests, the quest log and the rest collapsible so they don’t take up as much space, and make the paid invoices collapsible too.",
     changed: [
@@ -3664,9 +3681,10 @@ VIEWS.today = function () {
   /* Every section of Today folds away and stays how you left it (Kevin, 2026-10-05:
      "so it doesn't take up as much space"). Crossed-out tasks clear from a button
      inside their own section; Completed empties from its bar. */
-  const clearRow = (list, what) => list.length
-    ? '<button class="btn file-done" data-act="file-done" data-scope="' + what + '">✓ Clear ' + list.length +
-      " finished → Completed</button>"
+  // Each crossed-out task has its own button; this moves several at once.
+  const clearRow = (list, what) => list.length > 1
+    ? '<button class="btn file-done" data-act="file-done" data-scope="' + what + '">↓ Move all ' + list.length +
+      " finished to Completed</button>"
     : "";
   const crossedQuests = crossed.filter(holdsSlot);
   const crossedLog = crossed.filter((t) => !holdsSlot(t));
@@ -3776,6 +3794,11 @@ VIEWS.money = function () {
   /* Each section is kept on its own so a phone can show one at a time. */
   const part = {};
   const mark = (k) => { part[k] = html.length; };
+  /* And each folds away, remembered (Kevin, 2026-10-05): a section is built as
+     before, then everything from `from` on is wrapped in its fold. */
+  const folded = (key, head, from, actions) => {
+    html = html.slice(0, from) + fold(key, head, "", html.slice(from), false, actions);
+  };
 
   /* ---- By month: made, owed, projected ---- */
   mark("months");
@@ -3783,8 +3806,7 @@ VIEWS.money = function () {
   const mm = moneyByMonth(gigs);
   const mkeys = Object.keys(mm).sort();
   if (mkeys.length) {
-    html += '<h2 class="section-head">By month</h2>';
-    html += '<div class="monthstrip">' + mkeys.map((k) => {
+    html += fold("money-months", "By month", "", '<div class="monthstrip">' + mkeys.map((k) => {
       const m = mm[k];
       return '<div class="card mcard"><h3>' + esc(monthLabelOf(k)) + "</h3>" +
         '<div class="mline">Made (net)<b class="' + (m.made < 0 ? "neg" : "pos") + '">' +
@@ -3792,7 +3814,7 @@ VIEWS.money = function () {
         '<div class="mline">Upcoming / owed<b class="owed">' + money(m.upcoming) +
         (m.tbd ? " +" + m.tbd + " TBD" : "") + "</b></div>" +
         '<div class="mline total">Projected<b>' + money(m.made + m.upcoming) + "</b></div></div>";
-    }).join("") + "</div>";
+    }).join("") + "</div>");
   }
 
   /* ---- Awaiting payment ---- */
@@ -3803,8 +3825,7 @@ VIEWS.money = function () {
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const ot = owedTotals(owedRows);
 
-  html += '<h2 class="section-head">Awaiting payment' +
-    (ot.total ? ' <span class="count">' + money(ot.total) + "</span>" : "") + "</h2>";
+  const owedAt = html.length;
   html += '<div class="card tablewrap"><table class="tbl-owed"><thead><tr><th></th><th>Client</th>' +
     "<th>Gig</th><th>Date</th><th class=\"r\">Amount</th></tr></thead><tbody>";
   if (!owedRows.length) {
@@ -3833,6 +3854,7 @@ VIEWS.money = function () {
       '<td class="r">' + money(ot.total) + "</td></tr>";
   }
   html += "</tbody></table></div>";
+  folded("money-owed", "Awaiting payment" + (ot.total ? ' <span class="count">' + money(ot.total) + "</span>" : ""), owedAt);
 
   /* ---- Collected ---- */
   mark("paid");
@@ -3841,9 +3863,7 @@ VIEWS.money = function () {
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const collTotal = collected.reduce((s, i) => s + num(i.amount), 0);
 
-  html += '<h2 class="section-head">Collected' +
-    (collTotal ? ' <span class="count">' + money(collTotal) + "</span>" : "") +
-    '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button></h2>';
+  const paidAt = html.length;
   html += '<div class="card tablewrap"><table class="tbl-paid"><thead><tr><th>Client</th><th>Gig</th>' +
     "<th>Date</th><th>How</th><th class=\"r\">Amount</th></tr></thead><tbody>";
   if (!collected.length) {
@@ -3864,16 +3884,17 @@ VIEWS.money = function () {
     }).join("");
   }
   html += "</tbody></table></div>";
+  // A phone's bar has no room for it beside the total; it sits under the list there.
+  folded("money-paid", "Collected" + (collTotal ? ' <span class="count">' + money(collTotal) + "</span>" : ""), paidAt,
+    phone ? "" : '<button class="btn btn-sm section-action" data-act="new-income">＋ Log a payment</button>');
 
   mark("chart");
-  html += '<h2 class="section-head">In vs. out</h2>' +
-    '<div class="card card-pad">' + monthlyChart() + "</div>";
+  html += fold("money-chart", "In vs. out", "", '<div class="card card-pad">' + monthlyChart() + "</div>");
   mark("spent");
-  html += '<h2 class="section-head">Where it went</h2>' +
-    '<div class="card card-pad">' +
+  html += fold("money-where", "Where it went", "", '<div class="card card-pad">' +
     breakdown(groupSum(DB.expenses.filter((e) => (e.date || "").slice(0, 4) === String(f.year)),
       (e) => e.category || "Uncategorised"), "var(--money-out)", "No expenses logged this year.") +
-    "</div>";
+    "</div>");
   if (!phone) return html;
 
   /* ---- the phone: one section at a time ---- */
@@ -3892,7 +3913,8 @@ VIEWS.money = function () {
     out += cut("months", "owed") + cut("chart", "spent");
   } else if (sub === "paid") {
     out += cut("paid", "chart") +
-      '<div class="btn-row"><button class="btn" data-act="goto" data-view="income">All payments, by period</button></div>';
+      '<div class="btn-row"><button class="btn" data-act="new-income">＋ Log a payment</button>' +
+      '<button class="btn" data-act="goto" data-view="income">All payments, by period</button></div>';
   } else {
     out += cut("spent") + '<div class="btn-row">' +
       '<button class="btn" data-act="new-expense">Log expense</button>' +
@@ -6113,16 +6135,17 @@ function emailNextHTML(next) {
   const fresh = next.filter((r) => !r.draftedAt);
   const shown = state.nextShown || NEXT_PAGE;
   let html = "";
+  // Both lists fold away, like every other section (Kevin, 2026-10-05).
   if (drafted.length) {
-    html += '<h2 class="section-head">Drafted, not sent <span class="count">' + drafted.length + "</span></h2>" +
-      '<p class="fold-intro">Opened in Gmail, not marked as sent yet. Once one has gone, tick it off.</p>' +
+    html += fold("out-drafted", 'Drafted, not sent <span class="count">' + drafted.length + "</span>",
+      "Opened in Gmail, not marked as sent yet. Once one has gone, tick it off.",
       '<div class="card nx-list">' + drafted.map((r) => nxRow(r,
         '<button class="btn btn-sm" data-act="outreach-sent" data-id="' + esc(r.id) + '">Sent ✓</button>')).join("") +
-      "</div>";
+      "</div>");
   }
   if (fresh.length) {
-    html += '<h2 class="section-head">Up next <span class="count">' + fresh.length + "</span></h2>" +
-      '<p class="fold-intro">Smallest following first: they’re the most likely to write back.</p>' +
+    html += fold("out-next", 'Up next <span class="count">' + fresh.length + "</span>",
+      "Smallest following first: they’re the most likely to write back.",
       '<div class="card nx-list">' + fresh.slice(0, shown).map((r) => nxRow(r, r.festival
         ? '<button class="btn btn-sm btn-primary" data-act="draft-one" data-id="' + esc(r.id) +
           '" data-fest="' + esc(r.festival) + '">✉ Draft</button>'
@@ -6131,7 +6154,7 @@ function emailNextHTML(next) {
       (fresh.length > shown
         ? '<button class="btn nx-more" data-act="next-more">Show ' + Math.min(NEXT_PAGE, fresh.length - shown) +
           " more</button>"
-        : "");
+        : ""));
   }
   return html;
 }
@@ -6187,8 +6210,8 @@ function followUpHTML(fu, today) {
   return groups.map((g) => {
     const list = fu.filter((r) => followRank(r, today) === g.rank);
     return list.length
-      ? '<h2 class="section-head">' + g.head + ' <span class="count">' + list.length + "</span></h2>" +
-        '<div class="card nx-list">' + list.map(row).join("") + "</div>"
+      ? fold("out-fu-" + g.rank, g.head + ' <span class="count">' + list.length + "</span>", "",
+        '<div class="card nx-list">' + list.map(row).join("") + "</div>")
       : "";
   }).join("");
 }
@@ -6706,18 +6729,24 @@ function outreachList(rows, today) {
     } else loose.push(r);
   });
 
+  /* Each lineup folds away, shut to start, so the whole pipeline is a short list of
+     names until you open one (Kevin, 2026-10-05). */
   let html = "";
   Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((fest) => {
     const list = groups.get(fest).sort(byName);
     const toContact = list.filter((r) => r.status === "to-contact").length;
-    html += '<h3 class="fest-head">' + esc(fest) +
+    html += fold("out-all-" + festSlug(fest), esc(fest) +
       ' <span class="count">' + list.length + " act" + (list.length === 1 ? "" : "s") +
-      (toContact ? " \u00b7 " + toContact + " to contact" : "") + "</span></h3>";
-    list.forEach((r) => { html += outreachCard(r, today); });
+      (toContact ? " \u00b7 " + toContact + " to contact" : "") + "</span>", "",
+      list.map((r) => outreachCard(r, today)).join(""), true);
   });
   loose.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || byName(a, b));
-  if (loose.length && groups.size) html += '<h3 class="fest-head">Everyone else</h3>';
-  loose.forEach((r) => { html += outreachCard(r, today); });
+  const looseCards = loose.map((r) => outreachCard(r, today)).join("");
+  if (loose.length && groups.size) {
+    html += fold("out-all-loose", 'Everyone else <span class="count">' + loose.length + "</span>", "", looseCards, true);
+  } else {
+    html += looseCards;
+  }
   return html;
 }
 
@@ -7760,6 +7789,11 @@ document.addEventListener("click", (e) => {
       DB.todos = (DB.todos || []).filter((x) => x.id !== id);
       save(); refreshTodoList();
       break;
+    case "file-one": {
+      const x = (DB.todos || []).find((y) => y.id === id);
+      if (x && x.done) { x.filed = true; x.top = false; x.topRank = null; save(); refreshTodoList(); }
+      break;
+    }
     case "file-done": {
       // "quests" or "log": just that section's crossed-out tasks. Neither: all of them.
       const scope = el.dataset.scope;

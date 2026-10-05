@@ -4612,10 +4612,16 @@ th, .mob-table th { font-size: 14px; }
 .evrow.work .evtitle { color: var(--ink); }
 .evrow.off .evtitle { color: var(--ink-3); text-decoration: line-through; }
 .ev-dayoff { margin-top: 6px; }
+/* A count that doesn't fit beside its title drops under it rather than being squashed. */
+.fold-title { flex-wrap: wrap; row-gap: 4px; }
+.fold-title .count, .fold-title .count-pill { flex: none; }
 /* Buttons on a fold's bar (+ New task, Clear all) sit at its right, before the arrow. */
 .fold-actions { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: 8px; }
 .fold-actions .section-action { margin-left: 0; }
 .todo-card > .file-done { margin: 0 0 12px; }
+/* "Move to Completed" on a crossed-out task: plain words, so it reads at a glance. */
+.file-one { font-family: var(--font); font-weight: 800; font-size: 14px; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+.taskrow .file-one { flex: none; }
 /* Moving today's crossed-out tasks down: full width, under the quests. */
 .file-done { display: flex; width: 100%; justify-content: center; margin: 4px 0 6px;
              font-family: var(--font); font-weight: 800; font-size: 16px; letter-spacing: 0; text-transform: none; }
@@ -4791,7 +4797,10 @@ button.nx-row:hover { background: #F4F7FA; }
   /* Today: the fight as a strip above the quests, and quests that don't sprawl */
   .quest, .quest.slot.filled { padding: 12px 14px; gap: 8px 12px; }
   .quest .taskbody { flex-basis: calc(100% - 62px); }
-  .quest-side { padding-left: 58px; }
+  .quest-side { padding-left: 58px; flex-wrap: wrap; row-gap: 8px; }
+  /* A crossed-out quest's way down gets its own full-width line: easy to hit. */
+  .quest-side .file-one { order: 3; flex: 1 0 100%; justify-content: center; min-height: 42px; }
+  .taskrow .file-one { order: 9; flex: 1 0 100%; justify-content: center; min-height: 42px; }
   .tasktitle { font-size: 19px; line-height: 1.25; }
   .taskmeta { gap: 6px; margin-top: 6px; }
   .battle { margin-bottom: 12px; }
@@ -4873,6 +4882,9 @@ button.nx-row:hover { background: #F4F7FA; }
   .lineup:not(.open) .lineup-head .btn, .lineup:not(.open) .lineup-poster.add { display: none; }
   .lineup.open .lineup-poster.add { opacity: 1; }
   .lineup.open .lineup-head { margin-bottom: 10px; }
+  /* Outreach's All: a lineup's name on its bar in plain bold, like the Lineups rows. */
+  details[data-fold^="out-all-"] > summary .fold-title { font-family: var(--font); font-weight: 800; font-size: 16px;
+    letter-spacing: 0; text-transform: none; color: #FFFFFF; line-height: 1.25; }
 }
 
 /* The maps. Each is one drawing: sky, scenery and ground, anchored to the bottom.
