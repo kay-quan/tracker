@@ -1091,14 +1091,19 @@ t("a task finished today stays put, crossed out, until it's moved to Completed",
   T.setDB(db);
   T.setState({ view: "today", showDone: false });
   const html = T.VIEWS.today();
-  const log = html.indexOf("Quest log");
+  const log = html.indexOf('data-fold="today-log"'), done = html.indexOf('data-fold="today-done"');
   const quest = html.indexOf("Finished quest"), row = html.indexOf("Finished log task");
   if (quest < 0 || quest > log) throw new Error("a finished quest should stay in today's quests");
-  if (row < log) throw new Error("a finished log task should stay in the quest log");
+  if (row < log || row > done) throw new Error("a finished log task should stay in the quest log");
   if (!/class="taskrow done"/.test(html)) throw new Error("not crossed out");
-  if (html.indexOf("Finished yesterday") >= 0) throw new Error("yesterday's should have gone down on its own");
-  if (html.indexOf("Moved down today") >= 0) throw new Error("one moved to Completed is still on the list");
-  if (html.indexOf("Move 2 finished to Completed") < 0) throw new Error("no button to move them down");
+  if (html.indexOf("Finished yesterday") < done) throw new Error("yesterday's should have gone down on its own");
+  if (html.indexOf("Moved down today") < done) throw new Error("one moved to Completed is still on the list");
+  // Each section clears its own crossed-out tasks; Completed empties from its bar.
+  const qClear = html.indexOf('data-scope="quests"'), lClear = html.indexOf('data-scope="log"');
+  if (qClear < 0 || qClear > log) throw new Error("no Clear for the crossed-out quest");
+  if (lClear < log || lClear > done) throw new Error("no Clear for the crossed-out log task");
+  if (html.indexOf('data-act="clear-done-ask"') < done) throw new Error("Completed can't be emptied from its bar");
+  if (/data-fold="today-done"[^>]* open/.test(html)) throw new Error("Completed should start shut");
   if (html.indexOf("3 of 4 done") < 0) throw new Error("the counter should read 3 of 4 done");
   // The crossed-out quest still holds its slot; yesterday's doesn't.
   eq(T.todaysQuests().picked.map((x) => x.id).join(","), "a,b");
@@ -1576,6 +1581,26 @@ t("a phone's Today puts quests before the stats, which fold away", () => {
   const panel = html.indexOf("stats-head");
   if (panel >= 0 && panel < quests) throw new Error("the full stats panel still sits above the quests");
   if (/data-fold="today-stats"[^>]* open/.test(html)) throw new Error("the stats fold should start shut");
+});
+
+t("Today's sections fold away, and Invoices' Paid list starts shut", () => {
+  const db = T.withDefaults(T.defaultData());
+  db.settings.yourName = "Test Person"; db.settings.email = "t@example.test";
+  db.todos = [{ id: "a", text: "Ship it", top: true, topRank: 0 }, { id: "b", text: "Later" }];
+  db.invoices = [{ id: "i", number: "INV-0001", clientId: "", issueDate: "2026-09-01", dueDate: "2026-09-15",
+                   items: [{ description: "Shoot", qty: 1, rate: 300 }], status: "paid" }];
+  T.setDB(db);
+  T.setState({ view: "today", showDone: false });
+  const html = T.VIEWS.today();
+  ["today-quests", "today-log"].forEach((k) => {
+    if (html.indexOf('data-fold="' + k + '"') < 0) throw new Error(k + " doesn't fold");
+  });
+  if (html.indexOf('class="fold-actions"><button class="btn btn-sm section-action" data-act="new-task"') < 0) {
+    throw new Error("+ New task should sit on the quest log's bar");
+  }
+  T.setState({ view: "invoices" });
+  const inv = T.VIEWS.invoices();
+  if (!/data-fold="inv-paid" data-fold-shut="1">/.test(inv)) throw new Error("Paid should fold, shut to start");
 });
 
 /* ---------- work days ---------- */

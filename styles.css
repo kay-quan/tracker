@@ -4612,6 +4612,10 @@ th, .mob-table th { font-size: 14px; }
 .evrow.work .evtitle { color: var(--ink); }
 .evrow.off .evtitle { color: var(--ink-3); text-decoration: line-through; }
 .ev-dayoff { margin-top: 6px; }
+/* Buttons on a fold's bar (+ New task, Clear all) sit at its right, before the arrow. */
+.fold-actions { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: 8px; }
+.fold-actions .section-action { margin-left: 0; }
+.todo-card > .file-done { margin: 0 0 12px; }
 /* Moving today's crossed-out tasks down: full width, under the quests. */
 .file-done { display: flex; width: 100%; justify-content: center; margin: 4px 0 6px;
              font-family: var(--font); font-weight: 800; font-size: 16px; letter-spacing: 0; text-transform: none; }

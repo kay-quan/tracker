@@ -3219,6 +3219,14 @@ function playbookCard(p, featured) {
    Newest first. Every change that ships adds an entry here: what was asked for,
    and what changed. This repo is public, so keep the wording neutral. */
 const CHANGELOG = [
+  { date: "2026-10-05", title: "Fold-away Today sections, a Clear button you can find, Paid folds",
+    asked: "I can tick things off, but how do I clear them? Make Today’s quests, the quest log and the rest collapsible so they don’t take up as much space, and make the paid invoices collapsible too.",
+    changed: [
+      "Crossed-out tasks clear with a “✓ Clear finished → Completed” button inside their own section: under today’s quests, and at the top of the quest log.",
+      "Completed has “Clear all” right on its bar, so you don’t have to open a long list to find it. It asks first. The EXP, levels and streaks those tasks earned stay.",
+      "Today’s quests, Quest log, Completed and Heads up each fold away when you tap their title, and stay how you left them. On a phone, Can’t decide, the boss and the next reward fold together as Side quests.",
+      "Invoices: Paid folds away and starts shut, with the count and total on its bar.",
+    ] },
   { date: "2026-10-04", title: "Finished tasks stay put, work days on the calendar, tidier Settings",
     asked: "When I finish a task, don’t move it to Completed straight away: cross it out, and let me move it down when I’m ready, so undoing a tap is easy. Add a Work button on the calendar next to gig and personal event, for my full-time job. The spacing in Settings looks a little weird.",
     changed: [
@@ -3348,10 +3356,12 @@ function foldState() {
 const foldOpen = (key) => foldState()[key] !== false;
 
 // Folds start open unless `shut` says otherwise; either way the phone remembers yours.
-function fold(key, head, intro, body, shut) {
+// `actions` are buttons on the bar itself, so they work with the fold shut.
+function fold(key, head, intro, body, shut, actions) {
   const open = shut ? foldState()[key] === true : foldOpen(key);
   return '<details class="fold" data-fold="' + key + '"' + (shut ? ' data-fold-shut="1"' : "") + (open ? " open" : "") + ">" +
     '<summary class="section-head fold-head"><span class="fold-title">' + head + "</span>" +
+    (actions ? '<span class="fold-actions">' + actions + "</span>" : "") +
     '<span class="fold-caret" aria-hidden="true"></span></summary>' +
     '<div class="fold-body">' + (intro ? '<p class="fold-intro">' + intro + "</p>" : "") + body + "</div></details>";
 }
@@ -3650,56 +3660,54 @@ VIEWS.today = function () {
   html += battleCard(q, g.level);
 
   html += '<div class="play-cols"><div class="play-main">';
-  html += '<div class="quest-head"><h2>Today’s quests</h2>' +
-    (total ? '<span class="count-pill">' + doneToday.length + " of " + total + " done</span>" : "") + "</div>";
 
-  quests.forEach((t) => { html += questCard(t, { upNext: t === q.open[0], fromLog: t === fallback, sheet: sheet }); });
+  /* Every section of Today folds away and stays how you left it (Kevin, 2026-10-05:
+     "so it doesn't take up as much space"). Crossed-out tasks clear from a button
+     inside their own section; Completed empties from its bar. */
+  const clearRow = (list, what) => list.length
+    ? '<button class="btn file-done" data-act="file-done" data-scope="' + what + '">✓ Clear ' + list.length +
+      " finished → Completed</button>"
+    : "";
+  const crossedQuests = crossed.filter(holdsSlot);
+  const crossedLog = crossed.filter((t) => !holdsSlot(t));
+
+  let qb = "";
+  quests.forEach((t) => { qb += questCard(t, { upNext: t === q.open[0], fromLog: t === fallback, sheet: sheet }); });
 
   // One open slot at a time: a drop target for dragging, a button for tapping.
   const used = picked.map((t) => t.topRank);
   const free = [0, 1, 2].find((r) => used.indexOf(r) < 0);
   if (free !== undefined) {
-    html += '<div class="slot quest-slot" data-slot="' + free + '" data-act="pick-top" data-rank="' + free + '">' +
+    qb += '<div class="slot quest-slot" data-slot="' + free + '" data-act="pick-top" data-rank="' + free + '">' +
       '<span class="slot-plus" aria-hidden="true">＋</span>' +
       '<span class="slot-empty">' + (picked.length ? "Add another quest" : "Pick a quest for today") +
       '<span class="drag-hint"> · drag one here or click</span></span></div>';
   }
-
-  /* Finished quests leave the list straight away and go to Completed below; the
-     counter and the monster keep score. */
   if (!q.open.length && doneToday.length) {
-    html += '<p class="quests-clear">\ud83c\udf89 All of today\u2019s quests are done. Nice work.</p>';
+    qb += '<p class="quests-clear">🎉 All of today’s quests are done. Nice work.</p>';
   }
-
-  /* Today's crossed-out tasks go down to Completed when you say so: one button, up
-     here where you've just been ticking, for the quests and the log alike. */
-  if (crossed.length) {
-    html += '<button class="btn file-done" data-act="file-done">\u2193 Move ' + crossed.length +
-      " finished to Completed</button>";
-  }
+  qb += clearRow(crossedQuests, "quests");
+  html += fold("today-quests", "Today’s quests" +
+    (total ? ' <span class="count-pill">' + doneToday.length + " of " + total + (phone ? "" : " done") + "</span>" : ""),
+    "", qb);
 
   /* ---- the quest log: everything else ---- */
   const open = todos.filter((t) => !t.done && !t.top && t !== fallback);
-  html += '<h2 class="section-head">Quest log' +
-    (open.length ? ' <span class="count">' + open.length + "</span>" : "") +
+  html += fold("today-log", "Quest log" + (open.length ? ' <span class="count">' + open.length + "</span>" : ""), "",
+    '<div class="card card-pad todo-card">' + todoAddRow() + clearRow(crossedLog, "log") +
+    '<div id="todo-list">' + todoListHTML(fallback && fallback.id, sheet) + "</div></div>", false,
     '<button class="btn btn-sm section-action" data-act="new-task"' +
-    ' title="With a category, due date and notes">＋ New task</button></h2>';
-  html += '<div class="card card-pad todo-card">' + todoAddRow() +
-    '<div id="todo-list">' + todoListHTML(fallback && fallback.id, sheet) + "</div></div>";
+    ' title="With a category, due date and notes">＋ New task</button>');
 
-  const done = todos.filter((t) => t.done && !inPlace(t));
+  // Newest first, and each one can be put back rather than only deleted.
+  const done = todos.filter((t) => t.done && !inPlace(t))
+    .sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
   if (done.length) {
-    html += '<button class="disclosure" data-act="toggle-done" aria-expanded="' + !!state.showDone + '">' +
-      '<span class="fold-title">Completed <span class="count">' + done.length + "</span></span>" +
-      '<span class="fold-caret" aria-hidden="true"></span></button>';
-    if (state.showDone) {
-      // Newest first, and each one can be put back rather than only deleted.
-      const recent = done.slice().sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
-      html += '<div class="card card-pad todo-card">' +
-        recent.map((t) => taskRow(t, { restore: true, sheet: sheet })).join("") +
-        '<button class="btn btn-sm btn-ghost" data-act="clear-done" style="margin-top:10px">Clear ' +
-        done.length + " finished</button></div>";
-    }
+    html += fold("today-done", 'Completed <span class="count">' + done.length + "</span>", "",
+      '<div class="card card-pad todo-card">' + done.map((t) => taskRow(t, { restore: true, sheet: sheet })).join("") +
+      "</div>", true,
+      '<button class="btn btn-sm section-action" data-act="clear-done-ask" title="Delete these for good; ' +
+      'the EXP they earned stays">Clear all</button>');
   }
 
   /* ---- heads up: the money and setup nudges, below the game ---- */
@@ -3715,12 +3723,14 @@ VIEWS.today = function () {
       (n.action.view ? ' data-view="' + n.action.view + '"' : "") +
       (n.action.id ? ' data-id="' + n.action.id + '"' : "") + ">" + esc(n.action.label) + "</button></div>");
   });
-  if (notes.length) html += '<h2 class="section-head">Heads up</h2>' + notes.join("");
+  if (notes.length) html += fold("today-heads", 'Heads up <span class="count">' + notes.length + "</span>", "", notes.join(""));
 
   html += '</div><aside class="play-side">';
 
-  /* ---- sidebar: the Gachapon, the boss fight, the next reward ---- */
-  html += gachaponCard() + bossCard() + rewardCard();
+  /* ---- sidebar: the Gachapon, the boss fight, the next reward. On a phone they
+     sit under everything else, so they fold away together as side quests. ---- */
+  const side = gachaponCard() + bossCard() + rewardCard();
+  html += phone ? fold("today-side", "Side quests", "", side) : side;
 
   html += "</aside></div>";
   if (phone) {
@@ -5060,15 +5070,17 @@ VIEWS.invoices = function () {
     html += '<div class="card card-pad"><p class="muted" style="margin:0;font-size:17px">' +
       "Nothing paid yet. Invoices land here once they're settled.</p></div>";
   }
+  /* Paid is history: it folds away, shut to start, so a long list of settled
+     invoices isn't the first thing you scroll past (Kevin, 2026-10-05). */
   if (settled.length && want("paid")) {
-    html += '<h2 class="section-head">Paid <span class="count">' + settled.length + "</span></h2>";
-    settled.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).forEach((inv) => {
-      html += '<div class="listrow" data-act="preview-invoice" data-id="' + inv.id + '">' +
+    const paidTotal = settled.reduce((sum, inv) => sum + invoiceTotals(inv).total, 0);
+    html += fold("inv-paid", 'Paid <span class="count">' + settled.length + " \u00b7 " + money0(paidTotal) + "</span>", "",
+      settled.sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || "")).map((inv) =>
+        '<div class="listrow" data-act="preview-invoice" data-id="' + inv.id + '">' +
         '<span><strong>' + esc(inv.number) + "</strong><br>" +
         '<span class="muted" style="font-size:15px">' + esc(clientName(inv.clientId)) + " \u00b7 " +
         esc(fmtDate(inv.issueDate)) + "</span></span>" +
-        '<span class="listrow-amt">' + money(invoiceTotals(inv).total) + "</span></div>";
-    });
+        '<span class="listrow-amt">' + money(invoiceTotals(inv).total) + "</span></div>").join(""), true);
   }
 
   return html;
@@ -7553,6 +7565,8 @@ document.addEventListener("click", (e) => {
   }
 
   if (el.tagName === "A") e.preventDefault();
+  // A button on a fold's bar does its job without also opening or shutting the fold.
+  if (el !== e.target.closest("summary") && el.closest("summary")) e.preventDefault();
 
   switch (act) {
     case "close-modal": closeModal(); break;
@@ -7691,7 +7705,6 @@ document.addEventListener("click", (e) => {
       render();
       break;
     }
-    case "toggle-done": state.showDone = !state.showDone; render(); break;
     case "pick-top": {
       // only the empty part of the slot opens the picker
       if (e.target.closest("button") && e.target.closest("button") !== el) break;
@@ -7747,18 +7760,30 @@ document.addEventListener("click", (e) => {
       DB.todos = (DB.todos || []).filter((x) => x.id !== id);
       save(); refreshTodoList();
       break;
-    case "clear-done": {
-      // Only what's down in Completed; today's crossed-out tasks stay put.
-      const gone = (DB.todos || []).filter((x) => x.done && !inPlace(x));
-      bankXP(gone);
-      DB.todos = (DB.todos || []).filter((x) => gone.indexOf(x) < 0);
+    case "file-done": {
+      // "quests" or "log": just that section's crossed-out tasks. Neither: all of them.
+      const scope = el.dataset.scope;
+      (DB.todos || []).filter(inPlace)
+        .filter((x) => !scope || (scope === "quests") === holdsSlot(x))
+        .forEach((x) => { x.filed = true; x.top = false; x.topRank = null; });
       save(); refreshTodoList();
       break;
     }
-    case "file-done":
-      (DB.todos || []).filter(inPlace).forEach((x) => { x.filed = true; x.top = false; x.topRank = null; });
-      save(); refreshTodoList();
+    case "clear-done-ask": {
+      const n = (DB.todos || []).filter((x) => x.done && !inPlace(x)).length;
+      if (!n) break;
+      openModal("Clear " + n + " finished task" + (n === 1 ? "" : "s") + "?",
+        "<p>They’re deleted for good. The EXP, levels and streaks they earned stay.</p>",
+        '<button class="btn" data-act="close-modal">Cancel</button>' +
+        '<button class="btn btn-danger" data-act="confirm-delete">Clear ' + n + "</button>");
+      window.__confirmYes = () => {
+        const gone = (DB.todos || []).filter((x) => x.done && !inPlace(x));
+        bankXP(gone);
+        DB.todos = (DB.todos || []).filter((x) => gone.indexOf(x) < 0);
+        save(); closeModal(); refreshTodoList();
+      };
       break;
+    }
 
     case "new-expense": expenseForm(null); break;
     case "edit-expense": expenseForm(DB.expenses.find((x) => x.id === id)); break;
